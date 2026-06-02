@@ -45,6 +45,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true; // keep the message channel open for the async sendResponse
   }
 
+  // autopilot.js (a content script) can't read its own tab id; hand it back so a
+  // run stays bound to the single tab that started it.
+  if (msg.type === "autopilot_whoami") {
+    sendResponse({ tabId: sender.tab && sender.tab.id });
+    return true;
+  }
+
   return false;
 });
 
