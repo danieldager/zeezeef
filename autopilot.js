@@ -18,6 +18,7 @@
   const RUN_KEY = "autopilot_run"; // runtime state (running, queue, idx, counters)
   const CFG_KEY = "autopilot_cfg"; // user settings
   const BADGE_ID = "__xcap_autopilot_badge";
+  const TRENDING_URL = "https://x.com/explore/tabs/trending";
 
   const DEFAULTS = {
     mode: "trending", // "trending" | "manual" | "current"
@@ -27,6 +28,8 @@
     maxTopics: 10, // stop after this many topics
     sessionMaxMin: 30, // hard wall-clock cap for the whole run
     loop: false, // when the queue is exhausted, start over (refresh trends)
+    threadDives: true, // occasionally dip into a comment thread, then return
+    threadDwellSec: 20, // how long to scroll inside a thread
   };
 
   let aborted = false; // module-local instant abort (badge / stop message)
@@ -85,25 +88,28 @@
     if ((run.visited || 0) >= cfg.maxTopics) return stop("max topics reached");
     if (isChallenged()) return stop("hit a verification / rate-limit challenge — stopped to protect the account");
 
-    // Trending: seed the queue from the "What's happening" trends (the short
-    // terms in the right sidebar — same cells as the Explore "Trending" tab).
-    // We read them off /home, not /explore (whose default "For you" tab is
-    // curated news with long headlines that don't work as plain searches).
+    // Trending: seed the queue from the Explore → Trending tab (a dense list of
+    // short trend terms). Navigate there once — `seededFrom` guards against a
+    // redirect loop — read the cells, then cycle each as a plain /search?q=term.
     if (cfg.mode === "trending" && (!run.queue || run.queue.length === 0)) {
-      const trends = await readTrends(cfg.maxTopics);
-      if (!trends.length) {
-        if (location.pathname !== "/home") return go("https://x.com/home");
-        return stop("couldn't read the 'What's happening' trends — widen the window, or use Manual mode");
+      if (!onTrendingTab() && !run.seededFrom) {
+        run.seededFrom = true;
+        await setRun(run);
+        return go(TRENDING_URL);
       }
+      const trends = await readTrends(cfg.maxTopics);
+      if (!trends.length)
+        return stop("couldn't read the Trending tab — reload x.com and retry, or use Manual mode");
       run.queue = trends;
       run.idx = 0;
+      run.seededFrom = false;
       await setRun(run);
       return go(trends[0].url);
     }
 
     showBadge(currentLabel(run, cfg));
-    await scrollForDwell(cfg, run);
-    if (aborted) return;
+    const res = await scrollPage(cfg.dwellSec * 1000, cfg, { allowDives: true, checkRun: true });
+    if (aborted || res === "abort" || res === "stop") return;
 
     // Re-read: the user may have stopped mid-dwell.
     const r = await getLocal(RUN_KEY);
@@ -115,8 +121,8 @@
     let next = r.idx + 1;
     if (next >= r.queue.length) {
       if (cfg.loop && cfg.mode === "trending") {
-        r.queue = []; r.idx = 0; await setRun(r);
-        return go("https://x.com/explore"); // refresh trends
+        r.queue = []; r.idx = 0; r.seededFrom = false; await setRun(r);
+        return go(TRENDING_URL); // refresh trends
       }
       if (cfg.loop && cfg.mode === "manual") next = 0;
       else return stop("completed all topics");
@@ -126,23 +132,46 @@
     go(r.queue[next].url);
   }
 
-  // Scroll the current feed for the dwell window (or until it stops growing).
-  async function scrollForDwell(cfg, run) {
-    const dwellMs = cfg.dwellSec * 1000;
-    const start = Date.now();
+  // Scroll the current page for `durationMs` with human-ish jittered cadence, an
+  // end-of-feed backoff, and periodic abort / challenge / session-cap checks.
+  // With opts.allowDives, it occasionally dips into a comment thread and extends
+  // the window by the time spent there (so the feed still gets its full scroll).
+  // Returns "abort" | "stop" | "exhausted" | "done".
+  async function scrollPage(durationMs, cfg, opts = {}) {
+    let end = Date.now() + durationMs;
     const scroller = document.scrollingElement || document.documentElement;
-    let lastH = 0, stale = 0, n = 0;
+    let lastH = 0, stale = 0, n = 0, dives = 0;
+    let nextDiveAt = Date.now() + jitter(35000);
 
-    while (Date.now() - start < dwellMs) {
-      if (aborted) return;
-      // Stay responsive to a stop and re-check the wall-clock cap periodically.
+    while (Date.now() < end) {
+      if (aborted) return "abort";
+
       if (n % 5 === 0) {
-        const r = await getLocal(RUN_KEY);
-        if (!r || !r.running) return;
-        if (isChallenged())
-          return stop("hit a verification / rate-limit challenge — stopped to protect the account");
-        if (Date.now() - r.startedAt > cfg.sessionMaxMin * 60000)
-          return stop("session time cap reached");
+        if (isChallenged()) {
+          stop("hit a verification / rate-limit challenge — stopped to protect the account");
+          return "stop";
+        }
+        if (opts.checkRun) {
+          const r = await getLocal(RUN_KEY);
+          if (!r || !r.running) return "stop";
+          if (Date.now() - r.startedAt > cfg.sessionMaxMin * 60000) {
+            stop("session time cap reached");
+            return "stop";
+          }
+        }
+      }
+
+      // Occasional comment-thread dive (main feed only, capped per topic).
+      if (
+        opts.allowDives && cfg.threadDives && dives < 2 &&
+        Date.now() >= nextDiveAt && end - Date.now() > cfg.threadDwellSec * 1000 + 5000
+      ) {
+        const t0 = Date.now();
+        const dove = await threadDive(cfg);
+        if (aborted) return "abort";
+        if (dove) { dives++; end += Date.now() - t0; } // don't let the dive eat scroll time
+        nextDiveAt = Date.now() + jitter(35000);
+        continue;
       }
 
       window.scrollBy(0, Math.round(window.innerHeight * (0.7 + Math.random() * 0.25)));
@@ -151,16 +180,66 @@
       const h = scroller.scrollHeight;
       const atBottom = window.scrollY + window.innerHeight >= h - 200;
       if (atBottom && h === lastH) {
-        if (++stale >= 4) return; // feed exhausted — don't waste the rest of the dwell
+        if (++stale >= 4) return "exhausted"; // feed exhausted
       } else {
         stale = 0;
       }
       lastH = h;
 
-      // Human-ish cadence with the occasional longer "reading" pause.
       const base = cfg.cadenceSec * 1000;
       await sleep(jitter(n % 7 === 0 ? base * 3 : base));
     }
+    return "done";
+  }
+
+  // Pop into a comment thread: open a visible post's conversation (SPA — so the
+  // capture hook keeps running and the feed's scroll is restored on back), scroll
+  // the replies briefly, then return. Best-effort: any failure just resumes the
+  // feed. The replies are flagged downstream via `is_reply` and tagged with the
+  // current topic (background falls back to the run's topic on /status/ pages).
+  async function threadDive(cfg) {
+    try {
+      const link = pickVisibleTweetLink();
+      if (!link) return false;
+      const fromPath = location.pathname;
+      link.click(); // X's router handles the timestamp permalink → conversation
+      const opened = await waitForCondition(() => /\/status\/\d+/.test(location.pathname), 4000);
+      if (!opened) return false;
+      await scrollPage(cfg.threadDwellSec * 1000, cfg); // scroll the replies
+      if (aborted) return true;
+      history.back(); // SPA back → feed, scroll position restored
+      await waitForCondition(() => location.pathname === fromPath, 4000);
+      await sleep(jitter(900));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // A visible post's timestamp permalink (it wraps a <time>) — the reliable route
+  // into a conversation; avoids reply/quote/media sub-links.
+  function pickVisibleTweetLink() {
+    const links = Array.from(
+      document.querySelectorAll('article[data-testid="tweet"] a[href*="/status/"]')
+    ).filter((a) => {
+      if (!a.querySelector("time")) return false;
+      const r = a.getBoundingClientRect();
+      return r.top > 80 && r.bottom < window.innerHeight - 80;
+    });
+    return links.length ? links[Math.floor(Math.random() * links.length)] : null;
+  }
+
+  function waitForCondition(fn, timeoutMs) {
+    return new Promise((res) => {
+      if (fn()) return res(true);
+      const t0 = Date.now();
+      const iv = setInterval(() => {
+        if (fn() || Date.now() - t0 > timeoutMs) {
+          clearInterval(iv);
+          res(!!fn());
+        }
+      }, 200);
+    });
   }
 
   function go(url) {
@@ -183,7 +262,11 @@
     return false;
   }
 
-  // Read the rendered trend terms (the "What's happening" cells). Markup-
+  function onTrendingTab() {
+    return location.pathname.startsWith("/explore");
+  }
+
+  // Read the rendered trend terms (the Explore → Trending cells). Markup-
   // dependent — this is a maintenance point (like the GraphQL extractor). Each
   // becomes a plain search, exactly like clicking the trend: /search?q=<term>.
   async function readTrends(limit) {

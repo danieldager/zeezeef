@@ -6,6 +6,7 @@ importScripts("extractor.js"); // provides extractTweets() and opName()
 
 const SEEN_KEY = "seen_ids";
 const DATA_KEY = "captured";
+const RUN_KEY = "autopilot_run"; // autopilot runtime state (for topic attribution)
 const DEBUG = false; // flip true to log every capture to the SW console
 
 // ---------------------------------------------------------------------------
@@ -72,12 +73,18 @@ async function handlePayload(bodyText, apiUrl, pageUrl) {
   }
   if (!tweets || !tweets.length) return;
 
-  const store = await chrome.storage.local.get([SEEN_KEY, DATA_KEY]);
+  const store = await chrome.storage.local.get([SEEN_KEY, DATA_KEY, RUN_KEY]);
   const seen = new Set(store[SEEN_KEY] || []);
   const captured = store[DATA_KEY] || [];
 
   const op = opName(apiUrl);
-  const topic = topicFromUrl(pageUrl); // the search/trend term, or null
+  // topic from the /search URL; on a thread-dive (/status/ page) fall back to the
+  // autopilot's current topic so dived-into comments are still attributed.
+  let topic = topicFromUrl(pageUrl);
+  const run = store[RUN_KEY];
+  if (!topic && run && run.running && run.queue && run.queue[run.idx]) {
+    topic = run.queue[run.idx].label;
+  }
   const now = new Date().toISOString();
 
   const fresh = [];

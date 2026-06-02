@@ -75,6 +75,7 @@ function extractTweets(root) {
           unwrapTweet(node.legacy.retweeted_status_result.result);
         const text = (rtInner ? resolveText(rtInner) : null) || resolveText(node);
 
+        const replyTo = node.legacy.in_reply_to_status_id_str || null;
         out.push({
           id,
           full_text: text,
@@ -82,6 +83,8 @@ function extractTweets(root) {
           created_at: node.legacy.created_at || null,
           lang: node.legacy.lang || null,
           conversation_id: node.legacy.conversation_id_str || null,
+          is_reply: !!replyTo,
+          reply_to: replyTo,
         });
       }
     }

@@ -88,6 +88,8 @@ const ap = {
   maxTopics: document.getElementById("ap-maxtopics"),
   sessionMax: document.getElementById("ap-sessionmax"),
   loop: document.getElementById("ap-loop"),
+  threads: document.getElementById("ap-threads"),
+  threadDwell: document.getElementById("ap-threaddwell"),
   toggle: document.getElementById("ap-toggle"),
   status: document.getElementById("ap-status"),
 };
@@ -110,6 +112,8 @@ function readCfg() {
     maxTopics: clampNum(ap.maxTopics.value, 1, 100, 10),
     sessionMaxMin: clampNum(ap.sessionMax.value, 1, 240, 30),
     loop: ap.loop.checked,
+    threadDives: ap.threads.checked,
+    threadDwellSec: clampNum(ap.threadDwell.value, 5, 300, 20),
   };
 }
 
@@ -121,6 +125,8 @@ function applyCfg(cfg = {}) {
   if (cfg.maxTopics) ap.maxTopics.value = cfg.maxTopics;
   if (cfg.sessionMaxMin) ap.sessionMax.value = cfg.sessionMaxMin;
   ap.loop.checked = !!cfg.loop;
+  ap.threads.checked = cfg.threadDives !== false;
+  if (cfg.threadDwellSec) ap.threadDwell.value = cfg.threadDwellSec;
   toggleManual();
 }
 
@@ -139,7 +145,7 @@ async function renderAutopilot() {
 
   ap.toggle.textContent = running ? "■ Stop autopilot" : "▶ Start autopilot";
   ap.toggle.classList.toggle("danger", running);
-  [ap.mode, ap.manual, ap.dwell, ap.cadence, ap.maxTopics, ap.sessionMax, ap.loop].forEach(
+  [ap.mode, ap.manual, ap.dwell, ap.cadence, ap.maxTopics, ap.sessionMax, ap.loop, ap.threads, ap.threadDwell].forEach(
     (e) => (e.disabled = running)
   );
 

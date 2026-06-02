@@ -140,6 +140,18 @@ test("opName parses the GraphQL operation name", () => {
   assert.equal(opName("https://x.com/home"), null);
 });
 
+test("flags replies/comments via in_reply_to_status_id_str", () => {
+  const root = {
+    a: { __typename: "Tweet", rest_id: "5", legacy: { full_text: "a reply", in_reply_to_status_id_str: "4" } },
+    b: { __typename: "Tweet", rest_id: "6", legacy: { full_text: "top-level post" } },
+  };
+  const m = byId(extractTweets(root));
+  assert.equal(m.get("5").is_reply, true);
+  assert.equal(m.get("5").reply_to, "4");
+  assert.equal(m.get("6").is_reply, false);
+  assert.equal(m.get("6").reply_to, null);
+});
+
 test("topicFromUrl extracts the search query a post was collected under", () => {
   assert.equal(topicFromUrl("https://x.com/search?q=Israel&src=trend_click"), "Israel");
   assert.equal(topicFromUrl("https://x.com/search?q=State%20of%20Play&f=live"), "State of Play");
