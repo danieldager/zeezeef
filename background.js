@@ -139,9 +139,13 @@ async function handleSessionEnd() {
   const store = await chrome.storage.local.get([CFG_KEY, DATA_KEY, RUN_KEY]);
   const cfg = store[CFG_KEY] || {};
   const records = dedupById(store[DATA_KEY] || []);
+  const wantExport = !!cfg.autoExport && records.length > 0;
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 
-  if (cfg.autoExport && records.length) {
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  let exportOk = !wantExport; // nothing to export → treat as success
+  let note = "";
+
+  if (wantExport) {
     try {
       if (cfg.exportDest === "4cat" && cfg.fourcatUrl) {
         // 4CAT gets the raw Zeeschuimer-format records as-is.
@@ -149,46 +153,65 @@ async function handleSessionEnd() {
         const res = await uploadTo4cat(cfg.fourcatUrl, raw);
         if (DEBUG) console.log("[xcap] 4CAT upload result:", res);
       } else {
-        // The downloaded file gets the simplified, derived schema.
+        // Downloaded file = the simplified, derived schema.
         const simple = records.map((r) => JSON.stringify(projectSimplified(r))).join("\n") + "\n";
-        const url = "data:application/x-ndjson;base64," + b64utf8(simple);
-        await chrome.downloads.download({ url, filename: `x_capture_${stamp}.ndjson`, saveAs: false });
+        await downloadNdjson(simple, `x_capture_${stamp}.ndjson`);
       }
+      exportOk = true;
     } catch (e) {
+      // Fail gracefully: keep the data, and save a local fallback file so a
+      // session is never lost just because (e.g.) the 4CAT server is unreachable.
       console.error("[xcap] session-end export failed:", e);
+      note = "export failed — data kept";
+      try {
+        const raw = records.map((r) => JSON.stringify(r)).join("\n") + "\n";
+        await downloadNdjson(raw, `x_capture_${stamp}_export-failed.ndjson`);
+        note = "export failed (server unreachable?) — saved a fallback file; data kept";
+      } catch (_) {}
     }
   }
 
-  if (cfg.autoReset) {
+  // Never wipe or restart over data we failed to save.
+  if (cfg.autoReset && exportOk) {
     await chrome.storage.local.set({ [SEEN_KEY]: [], [DATA_KEY]: [] });
   }
-
-  if (cfg.autoRestart) {
+  if (cfg.autoRestart && exportOk) {
     const run = store[RUN_KEY] || {};
     const tabId = run.tabId;
-    const fresh = {
-      running: true,
-      startedAt: Date.now(),
-      tabId: tabId != null ? tabId : null,
-      queue:
-        cfg.mode === "manual"
-          ? (cfg.manualTopics || []).map((t) => ({
-              label: t,
-              url: `https://x.com/search?q=${encodeURIComponent(t)}&src=typed_query&f=live`,
-            }))
-          : [],
-      idx: 0,
-      visited: 0,
-      reason: null,
-      seededFrom: false,
-    };
-    await chrome.storage.local.set({ [RUN_KEY]: fresh });
+    await chrome.storage.local.set({
+      [RUN_KEY]: {
+        running: true,
+        startedAt: Date.now(),
+        tabId: tabId != null ? tabId : null,
+        queue:
+          cfg.mode === "manual"
+            ? (cfg.manualTopics || []).map((t) => ({
+                label: t,
+                url: `https://x.com/search?q=${encodeURIComponent(t)}&src=typed_query&f=live`,
+              }))
+            : [],
+        idx: 0,
+        visited: 0,
+        reason: null,
+        seededFrom: false,
+      },
+    });
     if (tabId != null) {
       try {
         await chrome.tabs.sendMessage(tabId, { type: "autopilot_start" });
       } catch (_) {}
     }
+  } else if (note) {
+    // Surface the failure in the reason the popup shows.
+    const cur = (await chrome.storage.local.get(RUN_KEY))[RUN_KEY] || {};
+    cur.reason = `${cur.reason || "session ended"} — ${note}`;
+    await chrome.storage.local.set({ [RUN_KEY]: cur });
   }
+}
+
+function downloadNdjson(text, filename) {
+  const url = "data:application/x-ndjson;base64," + b64utf8(text);
+  return chrome.downloads.download({ url, filename, saveAs: false });
 }
 
 function dedupById(records) {
@@ -217,18 +240,29 @@ function b64utf8(str) {
 // Requires host permission for the 4CAT origin (localhost is in the manifest).
 async function uploadTo4cat(baseUrl, ndjson) {
   const root = baseUrl.replace(/\/+$/, "");
-  const res = await fetch(root + "/api/import-dataset/", {
-    method: "POST",
-    headers: { "X-Zeeschuimer-Platform": "twitter" },
-    body: ndjson,
-  });
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000); // don't hang on a dead server
+  let res;
+  try {
+    res = await fetch(root + "/api/import-dataset/", {
+      method: "POST",
+      headers: { "X-Zeeschuimer-Platform": "twitter" },
+      body: ndjson,
+      signal: ctrl.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!res.ok) throw new Error(`4CAT responded ${res.status}`);
   const data = await res.json().catch(() => ({}));
   if (data && data.key) {
     const pollUrl = root + "/api/check-query/?key=" + encodeURIComponent(data.key);
+    let fails = 0;
     for (let i = 0; i < 60; i++) {
       await new Promise((r) => setTimeout(r, 1000));
       const p = await fetch(pollUrl).then((x) => x.json()).catch(() => null);
       if (p && p.done) return p;
+      if (p === null && ++fails >= 3) break; // server went away mid-poll
     }
   }
   return data;
