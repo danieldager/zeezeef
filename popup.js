@@ -90,6 +90,7 @@ const ap = {
   loop: document.getElementById("ap-loop"),
   threads: document.getElementById("ap-threads"),
   threadDwell: document.getElementById("ap-threaddwell"),
+  skim: document.getElementById("ap-skim"),
   toggle: document.getElementById("ap-toggle"),
   status: document.getElementById("ap-status"),
 };
@@ -114,6 +115,7 @@ function readCfg() {
     loop: ap.loop.checked,
     threadDives: ap.threads.checked,
     threadDwellSec: clampNum(ap.threadDwell.value, 5, 300, 20),
+    skimBursts: ap.skim.checked,
   };
 }
 
@@ -127,6 +129,7 @@ function applyCfg(cfg = {}) {
   ap.loop.checked = !!cfg.loop;
   ap.threads.checked = cfg.threadDives !== false;
   if (cfg.threadDwellSec) ap.threadDwell.value = cfg.threadDwellSec;
+  ap.skim.checked = cfg.skimBursts !== false;
   toggleManual();
 }
 
@@ -145,7 +148,7 @@ async function renderAutopilot() {
 
   ap.toggle.textContent = running ? "■ Stop autopilot" : "▶ Start autopilot";
   ap.toggle.classList.toggle("danger", running);
-  [ap.mode, ap.manual, ap.dwell, ap.cadence, ap.maxTopics, ap.sessionMax, ap.loop, ap.threads, ap.threadDwell].forEach(
+  [ap.mode, ap.manual, ap.dwell, ap.cadence, ap.maxTopics, ap.sessionMax, ap.loop, ap.threads, ap.threadDwell, ap.skim].forEach(
     (e) => (e.disabled = running)
   );
 

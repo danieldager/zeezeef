@@ -30,6 +30,10 @@
     loop: false, // when the queue is exhausted, start over (refresh trends)
     threadDives: true, // occasionally dip into a comment thread, then return
     threadDwellSec: 20, // how long to scroll inside a thread
+    skimBursts: true, // occasionally rip past a batch of posts, then stop
+    burstChance: 0.1, // probability of a skim burst per scroll step
+    burstLenMin: 3, // fast scrolls per burst (min)
+    burstLenMax: 8, // fast scrolls per burst (max)
   };
 
   let aborted = false; // module-local instant abort (badge / stop message)
@@ -69,9 +73,10 @@
 
   // Eased scroll (accelerate → peak → decelerate) as many small steps, so the
   // scroll-event stream has a human velocity profile rather than one jump.
-  async function smoothScrollBy(dy) {
-    const steps = 10 + Math.floor(Math.random() * 10); // 10–19
-    const dur = 220 + Math.random() * 500; // ~0.22–0.72s total
+  async function smoothScrollBy(dy, opts = {}) {
+    const fast = !!opts.fast;
+    const steps = fast ? 5 + Math.floor(Math.random() * 4) : 10 + Math.floor(Math.random() * 10);
+    const dur = fast ? 90 + Math.random() * 160 : 220 + Math.random() * 500; // total ms
     let moved = 0;
     for (let i = 1; i <= steps; i++) {
       if (aborted) return;
@@ -81,6 +86,18 @@
       window.scrollBy(0, target - moved);
       moved = target;
       await sleep((dur / steps) * (0.6 + Math.random() * 0.8));
+    }
+  }
+
+  // A fast skim: rip past a run of posts with big, quick scrolls and minimal
+  // pauses — the way people blow past a boring stretch before stopping to read.
+  async function skimBurst(cfg) {
+    const span = Math.max(0, cfg.burstLenMax - cfg.burstLenMin);
+    const len = cfg.burstLenMin + Math.floor(Math.random() * (span + 1));
+    for (let i = 0; i < len; i++) {
+      if (aborted) return;
+      await smoothScrollBy(window.innerHeight * (0.9 + Math.random() * 0.8), { fast: true });
+      await sleep(140 + Math.random() * 280);
     }
   }
 
@@ -214,6 +231,22 @@
         if (aborted) return "abort";
         if (dove) { dives++; end += Date.now() - t0; } // don't let the dive eat scroll time
         nextDiveAt = Date.now() + jitter(35000);
+        continue;
+      }
+
+      // Occasional fast skim: rip past a batch of posts, then stop and read.
+      if (cfg.skimBursts && Math.random() < cfg.burstChance) {
+        await skimBurst(cfg);
+        if (aborted) return "abort";
+        n++;
+        const h = scroller.scrollHeight;
+        if (window.scrollY + window.innerHeight >= h - 200 && h === lastH) {
+          if (++stale >= 4) return "exhausted";
+        } else {
+          stale = 0;
+        }
+        lastH = h;
+        await sleep(humanPause(cfg)); // stop and read after the skim
         continue;
       }
 
