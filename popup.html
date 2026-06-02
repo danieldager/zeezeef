@@ -11,7 +11,7 @@
         --card: #1e2a36;
         --field: #0f1923;
         --accent: #1d9bf0;
-        --accent-press: #1a8cd8;
+        --accent2: #1a8cd8;
         --text: #e7ecf0;
         --muted: #8899a6;
         --danger: #f4212e;
@@ -20,139 +20,176 @@
       }
       * { box-sizing: border-box; }
       body {
-        width: 300px;
+        width: 340px;
         margin: 0;
-        padding: 14px;
-        font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        padding: 16px;
+        font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         background: var(--bg);
         color: var(--text);
       }
-      h1 { margin: 0 0 2px; font-size: 14px; font-weight: 700; }
-      .scope { margin: 0 0 12px; font-size: 11px; color: var(--muted); }
-      .count-card {
-        background: var(--card); border-radius: 10px; padding: 12px;
-        text-align: center; margin-bottom: 12px;
+      h1 { margin: 0; font-size: 16px; font-weight: 800; letter-spacing: -0.2px; }
+      .tag { margin: 1px 0 14px; font-size: 11px; color: var(--muted); }
+      .sec { margin-top: 16px; }
+      .sec-h {
+        font-size: 10px; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.7px; color: var(--muted); margin: 0 0 8px;
       }
-      .count { font-size: 30px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
-      .count-label { font-size: 11px; color: var(--muted); margin-top: 2px; }
+      .card { background: var(--card); border-radius: 12px; padding: 14px; }
+      .count-row { display: flex; align-items: baseline; gap: 8px; }
+      .count { font-size: 34px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+      .count-label { font-size: 11px; color: var(--muted); }
       .ops { font-size: 10px; color: var(--muted); margin-top: 8px; word-break: break-word; min-height: 12px; }
       .row { display: flex; gap: 8px; }
+      .row.mt { margin-top: 12px; }
       button {
-        flex: 1; appearance: none; border: 0; border-radius: 999px; padding: 9px 12px;
+        flex: 1; appearance: none; border: 0; border-radius: 999px; padding: 10px 12px;
         font-size: 13px; font-weight: 700; cursor: pointer; color: #fff;
-        transition: background 0.12s ease, opacity 0.12s ease;
+        transition: background 0.12s, opacity 0.12s;
       }
-      #export { background: var(--accent); }
-      #export:hover { background: var(--accent-press); }
-      #export:disabled { opacity: 0.45; cursor: not-allowed; }
-      #reset { background: transparent; border: 1px solid var(--border); color: var(--text); }
-      #reset:hover { border-color: var(--danger); color: var(--danger); }
-      .status { margin-top: 10px; font-size: 11px; color: var(--muted); min-height: 14px; text-align: center; }
-
-      /* --- autopilot panel --- */
-      .divider { border: 0; border-top: 1px solid var(--border); margin: 14px 0 10px; }
-      .section-title { font-size: 12px; font-weight: 700; margin: 0 0 2px; }
-      .warn {
-        font-size: 10px; color: var(--warn); margin: 0 0 10px; line-height: 1.35;
-      }
-      label.field { display: block; font-size: 10px; color: var(--muted); margin: 0 0 3px; }
-      select, input[type="number"], textarea {
+      .btn-primary { background: var(--accent); }
+      .btn-primary:hover { background: var(--accent2); }
+      .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+      .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+      .btn-ghost:hover { border-color: var(--danger); color: var(--danger); }
+      .field { display: block; font-size: 10px; color: var(--muted); margin: 0 0 4px; }
+      select, input[type="number"], input[type="text"], textarea {
         width: 100%; background: var(--field); color: var(--text);
-        border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;
+        border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px;
         font: inherit; font-size: 12px;
       }
       select:disabled, input:disabled, textarea:disabled { opacity: 0.5; }
-      textarea { resize: vertical; min-height: 44px; }
-      .field-block { margin-bottom: 8px; }
-      .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
-      .inline { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); margin: 4px 0 10px; }
-      .inline input { width: auto; }
-      #ap-toggle { width: 100%; flex: none; background: var(--accent); }
-      #ap-toggle:hover { background: var(--accent-press); }
-      #ap-toggle.danger { background: var(--danger); }
-      .ap-status { margin-top: 8px; font-size: 11px; color: var(--muted); min-height: 14px; text-align: center; }
+      textarea { resize: vertical; min-height: 46px; }
+      .fb { margin-bottom: 10px; }
+      .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .chk { display: flex; align-items: center; gap: 7px; font-size: 12px; margin: 9px 0; }
+      .chk input { width: auto; flex: none; }
+      .chk label { flex: 1; }
+      .chk .num { width: 52px; flex: none; }
+      details { margin: 8px 0 0; }
+      summary { cursor: pointer; font-size: 11px; color: var(--accent); list-style: none; }
+      summary::-webkit-details-marker { display: none; }
+      summary::before { content: "▸ "; }
+      details[open] summary::before { content: "▾ "; }
+      .adv { padding: 8px 0 2px; }
+      #ap-toggle { width: 100%; flex: none; margin-top: 12px; }
+      #ap-toggle.running { background: var(--danger); }
+      .status { margin-top: 8px; font-size: 11px; color: var(--muted); min-height: 14px; text-align: center; }
+      .warn { font-size: 10px; color: var(--warn); margin: 8px 0 0; line-height: 1.4; }
+      .hint { font-size: 10px; color: var(--muted); margin-top: 5px; }
     </style>
   </head>
   <body>
     <h1>Zeezeef</h1>
-    <p class="scope">Captures the X posts you scroll. Export when done.</p>
+    <p class="tag">Browse-and-capture for X → NDJSON</p>
 
-    <div class="count-card">
-      <div class="count" id="count">0</div>
-      <div class="count-label">posts captured</div>
+    <!-- Captured -->
+    <div class="card">
+      <div class="count-row">
+        <span class="count" id="count">0</span>
+        <span class="count-label">posts captured</span>
+      </div>
       <div class="ops" id="ops"></div>
-    </div>
-
-    <div class="row">
-      <button id="export">Export NDJSON</button>
-      <button id="reset">Reset</button>
-    </div>
-    <div class="status" id="status"></div>
-
-    <hr class="divider" />
-
-    <p class="section-title">Autopilot · active collection</p>
-    <p class="warn">
-      ⚠ Automates scrolling &amp; topic-switching — this is bot-like activity that
-      X's ToS restricts and can get your account limited or suspended. Prefer a
-      dedicated research account.
-    </p>
-
-    <div class="field-block">
-      <label class="field" for="ap-mode">Source</label>
-      <select id="ap-mode">
-        <option value="trending">Trending topics (auto)</option>
-        <option value="manual">Manual topic list</option>
-        <option value="current">Current page only</option>
-      </select>
-    </div>
-
-    <div class="field-block" id="ap-manual-wrap" style="display: none">
-      <label class="field" for="ap-manual">Topics / hashtags (one per line)</label>
-      <textarea id="ap-manual" placeholder="#climate&#10;election fraud&#10;@someuser"></textarea>
-    </div>
-
-    <div class="grid2">
-      <div>
-        <label class="field" for="ap-dwell">Dwell / topic (s)</label>
-        <input type="number" id="ap-dwell" min="10" max="3600" step="5" value="90" />
+      <div class="row mt">
+        <button id="export" class="btn-primary">Export NDJSON</button>
+        <button id="reset" class="btn-ghost">Reset</button>
       </div>
-      <div>
-        <label class="field" for="ap-cadence">Scroll every (s)</label>
-        <input type="number" id="ap-cadence" min="0.5" max="30" step="0.5" value="2" />
+      <div class="status" id="status"></div>
+    </div>
+
+    <!-- Autopilot -->
+    <div class="sec">
+      <p class="sec-h">Autopilot · active collection</p>
+      <div class="card">
+        <div class="fb">
+          <label class="field" for="ap-mode">Source</label>
+          <select id="ap-mode">
+            <option value="trending">Trending topics</option>
+            <option value="manual">Manual topic list</option>
+            <option value="current">Current page only</option>
+          </select>
+        </div>
+
+        <div class="fb" id="ap-manual-wrap" style="display: none">
+          <label class="field" for="ap-manual">Topics / hashtags (one per line)</label>
+          <textarea id="ap-manual" placeholder="#climate&#10;election fraud&#10;@someuser"></textarea>
+        </div>
+
+        <div class="grid2">
+          <div>
+            <label class="field" for="ap-time">Run for (min)</label>
+            <input type="number" id="ap-time" min="1" max="600" step="1" value="30" />
+          </div>
+          <div>
+            <label class="field" for="ap-target">…or until (posts)</label>
+            <input type="number" id="ap-target" min="0" max="1000000" step="50" value="0" />
+          </div>
+        </div>
+        <div class="hint">Whichever comes first. 0 posts = no count limit; with a target, speed adapts to reach it.</div>
+
+        <div class="chk">
+          <input type="checkbox" id="ap-threads" checked />
+          <label for="ap-threads">Dip into comment threads</label>
+          <input type="number" class="num" id="ap-threaddwell" min="5" max="300" step="5" value="20" title="seconds per thread" />
+          <span>s</span>
+        </div>
+        <div class="chk">
+          <input type="checkbox" id="ap-skim" checked />
+          <label for="ap-skim">Fast-skim bursts</label>
+        </div>
+
+        <details>
+          <summary>Advanced pacing</summary>
+          <div class="adv grid2">
+            <div>
+              <label class="field" for="ap-dwell">Dwell / topic (s)</label>
+              <input type="number" id="ap-dwell" min="10" max="3600" step="5" value="90" />
+            </div>
+            <div>
+              <label class="field" for="ap-cadence">Scroll every (s)</label>
+              <input type="number" id="ap-cadence" min="0.5" max="30" step="0.5" value="2" />
+            </div>
+          </div>
+        </details>
+
+        <button id="ap-toggle" class="btn-primary">▶ Start autopilot</button>
+        <div class="status" id="ap-status"></div>
+        <p class="warn">⚠ Automation — X's ToS restricts this and it can get your account limited or suspended. Use a dedicated research account.</p>
       </div>
     </div>
-    <div class="grid2">
-      <div>
-        <label class="field" for="ap-maxtopics">Max topics</label>
-        <input type="number" id="ap-maxtopics" min="1" max="100" step="1" value="10" />
+
+    <!-- Session end -->
+    <div class="sec">
+      <p class="sec-h">When a session ends</p>
+      <div class="card">
+        <div class="chk">
+          <input type="checkbox" id="se-export" />
+          <label for="se-export">Auto-export the capture (timestamped)</label>
+        </div>
+        <div class="fb" id="se-dest-wrap" style="display: none">
+          <label class="field">Destination</label>
+          <div class="chk">
+            <input type="radio" name="se-dest" id="se-dest-file" value="file" checked />
+            <label for="se-dest-file">Download .ndjson file</label>
+          </div>
+          <div class="chk">
+            <input type="radio" name="se-dest" id="se-dest-4cat" value="4cat" />
+            <label for="se-dest-4cat">Upload to 4CAT</label>
+          </div>
+          <div id="se-4cat-wrap" style="display: none">
+            <label class="field" for="se-4caturl">4CAT server URL</label>
+            <input type="text" id="se-4caturl" value="http://localhost:4444" placeholder="http://localhost:4444" />
+          </div>
+        </div>
+        <div class="chk">
+          <input type="checkbox" id="se-reset" checked />
+          <label for="se-reset">Reset the store afterwards</label>
+        </div>
+        <div class="chk">
+          <input type="checkbox" id="se-restart" />
+          <label for="se-restart">Start another session automatically</label>
+        </div>
       </div>
-      <div>
-        <label class="field" for="ap-sessionmax">Session cap (min)</label>
-        <input type="number" id="ap-sessionmax" min="1" max="240" step="1" value="30" />
-      </div>
     </div>
-
-    <div class="inline">
-      <input type="checkbox" id="ap-loop" />
-      <label for="ap-loop">Loop (restart when topics run out)</label>
-    </div>
-
-    <div class="inline">
-      <input type="checkbox" id="ap-threads" checked />
-      <label for="ap-threads" style="flex: 1">Dip into comment threads</label>
-      <input type="number" id="ap-threaddwell" min="5" max="300" step="5" value="20"
-             title="seconds spent per thread" style="width: 54px" />
-      <span>s</span>
-    </div>
-
-    <div class="inline">
-      <input type="checkbox" id="ap-skim" checked />
-      <label for="ap-skim">Fast-skim bursts (occasionally rip past a batch)</label>
-    </div>
-
-    <button id="ap-toggle">▶ Start autopilot</button>
-    <div class="ap-status" id="ap-status"></div>
 
     <script src="popup.js"></script>
   </body>
