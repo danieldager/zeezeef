@@ -1,0 +1,13 @@
+# Captured data — NEVER commit real captures (X Terms of Service + privacy).
+# Exports land in the project root as x_capture_*.ndjson; keep them local.
+*.ndjson
+
+# OS / editor cruft
+.DS_Store
+*.swp
+
+# Node
+node_modules/
+
+# Logs / LaTeX-style build noise (none expected here, but just in case)
+*.log
