@@ -178,11 +178,14 @@ async function handleSessionEnd() {
   if (cfg.autoRestart && exportOk) {
     const run = store[RUN_KEY] || {};
     const tabId = run.tabId;
+    const cur = (await chrome.storage.local.get(DATA_KEY))[DATA_KEY];
     await chrome.storage.local.set({
       [RUN_KEY]: {
         running: true,
         startedAt: Date.now(),
+        startCount: Array.isArray(cur) ? cur.length : 0,
         tabId: tabId != null ? tabId : null,
+        mode: cfg.mode,
         queue:
           cfg.mode === "manual"
             ? (cfg.manualTopics || []).map((t) => ({

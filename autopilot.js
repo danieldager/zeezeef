@@ -139,6 +139,10 @@
     const myId = await myTabId();
     if (run.tabId != null && myId != null && run.tabId !== myId) return;
 
+    // Show the Stop badge immediately on the driving tab — including during the
+    // navigate-to-Trends step, before any scrolling starts.
+    showBadge(currentLabel(run, cfg));
+
     // Stop conditions + stale-run guard (a run older than the time budget won't
     // resume, e.g. after a browser restart).
     if (Date.now() - run.startedAt > cfg.sessionMaxMin * 60000)
@@ -237,7 +241,7 @@
           }
           // posts/min so far → adapt pace toward the target, never above the cap.
           const elapsedMin = Math.max(0.2, (Date.now() - r.startedAt) / 60000);
-          const rate = have / elapsedMin;
+          const rate = Math.max(0, have - (r.startCount || 0)) / elapsedMin; // posts/min this session
           if (cfg.targetPosts > 0) {
             const remainMin = Math.max(0.2, cfg.sessionMaxMin - elapsedMin);
             const required = (cfg.targetPosts - have) / remainMin; // posts/min still needed

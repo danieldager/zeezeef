@@ -215,16 +215,34 @@ async function startAutopilot() {
   }
 
   await chrome.storage.local.set({ [CFG_KEY]: cfg });
-  const queue =
-    cfg.mode === "manual"
+
+  // Resume where the last run left off when the mode is unchanged (keep the
+  // topic queue + position); otherwise start fresh. New params (dwell, target,
+  // time, threads, …) apply automatically. If already over the post target, the
+  // first drive tick will export & end the session.
+  const prev = (await chrome.storage.local.get(RUN_KEY))[RUN_KEY];
+  const resume =
+    prev && prev.mode === cfg.mode && Array.isArray(prev.queue) && prev.queue.length > 0;
+  const queue = resume
+    ? prev.queue
+    : cfg.mode === "manual"
       ? cfg.manualTopics.map((t) => ({
           label: t,
           url: `https://x.com/search?q=${encodeURIComponent(t)}&src=typed_query&f=live`,
         }))
       : [];
+  const { [DATA_KEY]: have = [] } = await chrome.storage.local.get(DATA_KEY);
   const run = {
-    running: true, startedAt: Date.now(), tabId: tab.id,
-    queue, idx: 0, visited: 0, reason: null, seededFrom: false,
+    running: true,
+    startedAt: Date.now(),
+    startCount: Array.isArray(have) ? have.length : 0, // baseline for posts/min
+    tabId: tab.id,
+    mode: cfg.mode,
+    queue,
+    idx: resume ? prev.idx || 0 : 0,
+    visited: resume ? prev.visited || 0 : 0,
+    reason: null,
+    seededFrom: resume ? !!prev.seededFrom : false,
   };
   await chrome.storage.local.set({ [RUN_KEY]: run });
 
