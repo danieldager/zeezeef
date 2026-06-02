@@ -80,8 +80,38 @@ const ap = {
   time: $("ap-time"), target: $("ap-target"),
   threads: $("ap-threads"), threadDwell: $("ap-threaddwell"), skim: $("ap-skim"),
   dwell: $("ap-dwell"), cadence: $("ap-cadence"),
+  feasibility: $("ap-feasibility"),
   toggle: $("ap-toggle"), status: $("ap-status"),
 };
+
+const MAX_RATE = 100; // hard cap on posts/min (matches autopilot.js)
+
+// Live sanity check on the run-until settings: required pace, over-cap, > 2 h.
+function checkFeasibility() {
+  const time = clampNum(ap.time.value, 1, 600, 30);
+  const target = clampNum(ap.target.value, 0, 1000000, 0);
+  const warn = [];
+  if (time > 120) warn.push(`Session is ${time} min (over 2 h) — long automated runs raise account risk.`);
+  if (target > 0) {
+    const required = target / time;
+    const minTime = Math.ceil(target / MAX_RATE);
+    if (required > MAX_RATE) {
+      warn.push(`~${Math.round(required)}/min needed to reach ${target} in ${time} min — above the ${MAX_RATE}/min cap, so it will fall short. Raise time to ≥ ${minTime} min, or lower the target.`);
+    } else if (minTime > 120) {
+      warn.push(`Even at ${MAX_RATE}/min, ${target} posts takes ~${minTime} min (over 2 h).`);
+    }
+  }
+  if (warn.length) {
+    ap.feasibility.textContent = "⚠ " + warn.join(" ");
+    ap.feasibility.className = "warn";
+  } else if (target > 0) {
+    ap.feasibility.textContent = `Target pace ~${Math.round(target / time)}/min (cap ${MAX_RATE}/min). Stops at ${target} posts or ${time} min.`;
+    ap.feasibility.className = "hint";
+  } else {
+    ap.feasibility.textContent = `No post target — runs for ${time} min (capped at ${MAX_RATE}/min).`;
+    ap.feasibility.className = "hint";
+  }
+}
 const se = {
   exportOn: $("se-export"), destWrap: $("se-dest-wrap"),
   destFile: $("se-dest-file"), dest4cat: $("se-dest-4cat"),
@@ -134,6 +164,7 @@ function applyCfg(cfg = {}) {
   se.restart.checked = !!cfg.autoRestart;
   toggleManual();
   toggleDest();
+  checkFeasibility();
 }
 
 async function activeTabId() {
@@ -208,6 +239,8 @@ async function stopAutopilot() {
 }
 
 ap.mode.addEventListener("change", toggleManual);
+ap.time.addEventListener("input", checkFeasibility);
+ap.target.addEventListener("input", checkFeasibility);
 se.exportOn.addEventListener("change", toggleDest);
 se.destFile.addEventListener("change", toggle4cat);
 se.dest4cat.addEventListener("change", toggle4cat);

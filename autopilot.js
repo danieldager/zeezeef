@@ -41,6 +41,7 @@
   };
   const TRENDS_PER_CYCLE = 20; // trends to read per trending cycle
   const DATA_KEY = "captured"; // capture store (read for the post target)
+  const MAX_RATE = 100; // hard cap on captured posts per minute
 
   let aborted = false; // module-local instant abort (badge / stop message)
   let busy = false; // guard against overlapping drive() runs
@@ -229,21 +230,24 @@
             finishSession("time budget reached");
             return "stop";
           }
-          if (cfg.targetPosts > 0) {
-            const have = await capturedCount();
-            if (have >= cfg.targetPosts) {
-              finishSession("post target reached");
-              return "stop";
-            }
-            // Adapt speed: pace toward the target. Behind → shorter gaps/stops.
-            const elapsedMin = (Date.now() - r.startedAt) / 60000;
-            const remainMin = Math.max(0.2, cfg.sessionMaxMin - elapsedMin);
-            const required = (cfg.targetPosts - have) / remainMin; // posts/min needed
-            const actual = have / Math.max(0.2, elapsedMin);
-            paceFactor = required > 0 ? Math.min(1.4, Math.max(0.35, actual / required)) : 1.4;
-          } else {
-            paceFactor = 1;
+          const have = await capturedCount();
+          if (cfg.targetPosts > 0 && have >= cfg.targetPosts) {
+            finishSession("post target reached");
+            return "stop";
           }
+          // posts/min so far → adapt pace toward the target, never above the cap.
+          const elapsedMin = Math.max(0.2, (Date.now() - r.startedAt) / 60000);
+          const rate = have / elapsedMin;
+          if (cfg.targetPosts > 0) {
+            const remainMin = Math.max(0.2, cfg.sessionMaxMin - elapsedMin);
+            const required = (cfg.targetPosts - have) / remainMin; // posts/min still needed
+            const targetRate = Math.min(required, MAX_RATE);
+            paceFactor = targetRate > 0 ? Math.min(4, Math.max(0.35, rate / targetRate)) : 4;
+          } else {
+            // no target: normal pace, but slow down if over the cap
+            paceFactor = rate > MAX_RATE ? Math.min(4, rate / MAX_RATE) : 1;
+          }
+          updateBadgeRate(rate);
         }
       }
 
@@ -446,7 +450,10 @@
   }
 
   // Always-visible abort affordance (the popup closes on each navigation).
+  let badgeLabel = "";
+  let badgeRate = 0;
   function showBadge(label) {
+    badgeLabel = label;
     let b = document.getElementById(BADGE_ID);
     if (!b) {
       b = document.createElement("div");
@@ -460,9 +467,20 @@
       b.addEventListener("click", () => { aborted = true; stop("stopped from on-page button"); });
       document.documentElement.appendChild(b);
     }
-    b.textContent = `■ Stop autopilot — ${label}`;
+    drawBadge();
+  }
+  function updateBadgeRate(rate) {
+    badgeRate = rate;
+    drawBadge();
+  }
+  function drawBadge() {
+    const b = document.getElementById(BADGE_ID);
+    if (!b) return;
+    b.textContent =
+      `■ Stop autopilot — ${badgeLabel}` + (badgeRate ? ` · ~${Math.round(badgeRate)}/min` : "");
   }
   function removeBadge() {
+    badgeRate = 0;
     const b = document.getElementById(BADGE_ID);
     if (b) b.remove();
   }
