@@ -72,6 +72,12 @@ One JSON object per line, UTF-8, newline-separated, one line per unique post:
 | `is_reply` | `true` if the post is a reply / comment (has `in_reply_to_status_id_str`) |
 | `reply_to` | Id of the post this one replies to, or `null` |
 
+**Two output formats.** Zeezeef stores the **raw** tweet objects and derives
+views from them:
+- **Export button / file auto-export →** the **simplified** schema above.
+- **4CAT upload →** the **raw** tweet objects (Zeeschuimer-format, each wrapped
+  with `__import_meta`), which 4CAT's X importer ingests natively.
+
 ---
 
 ## How it works

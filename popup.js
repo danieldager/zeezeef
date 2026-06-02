@@ -36,7 +36,7 @@ async function refresh() {
   $export.disabled = unique.length === 0;
   const byOp = {};
   for (const r of unique) {
-    const o = r.operation || "unknown";
+    const o = (r.__import_meta && r.__import_meta.operation) || "unknown";
     byOp[o] = (byOp[o] || 0) + 1;
   }
   $ops.textContent = Object.entries(byOp)
@@ -50,7 +50,8 @@ $export.addEventListener("click", async () => {
   setStatus("");
   const unique = await refresh();
   if (!unique.length) { setStatus("Nothing to export yet."); return; }
-  const ndjson = unique.map((r) => JSON.stringify(r)).join("\n") + "\n";
+  // Download = the simplified, analysis-friendly schema (4CAT gets raw instead).
+  const ndjson = unique.map((r) => JSON.stringify(projectSimplified(r))).join("\n") + "\n";
   const blob = new Blob([ndjson], { type: "application/x-ndjson" });
   const url = URL.createObjectURL(blob);
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");

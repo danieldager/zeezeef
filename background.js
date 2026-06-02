@@ -72,14 +72,14 @@ async function handlePayload(bodyText, apiUrl, pageUrl) {
     return; // not JSON / partial body — ignore
   }
 
-  let tweets;
+  let raws;
   try {
-    tweets = extractTweets(json);
+    raws = extractRaw(json);
   } catch (e) {
     if (DEBUG) console.error("[xcap] extract failed", e);
     return;
   }
-  if (!tweets || !tweets.length) return;
+  if (!raws || !raws.length) return;
 
   const store = await chrome.storage.local.get([SEEN_KEY, DATA_KEY, RUN_KEY]);
   const seen = new Set(store[SEEN_KEY] || []);
@@ -93,18 +93,27 @@ async function handlePayload(bodyText, apiUrl, pageUrl) {
   if (!topic && run && run.running && run.queue && run.queue[run.idx]) {
     topic = run.queue[run.idx].label;
   }
-  const now = new Date().toISOString();
+  const now = Date.now();
+  const nowIso = new Date(now).toISOString();
 
   const fresh = [];
-  for (const t of tweets) {
-    if (!t.id || seen.has(t.id)) continue;
-    seen.add(t.id);
+  for (const node of raws) {
+    const id = node.rest_id || (node.legacy && node.legacy.id_str);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    // Store the raw tweet object + Zeeschuimer-style provenance. This is the
+    // 4CAT-native record; the simplified schema is derived from it on export.
     fresh.push({
-      ...t,
-      captured_at: now,
-      source_url: pageUrl || "",
-      operation: op,
-      topic,
+      ...node,
+      id,
+      __import_meta: {
+        source_platform: "twitter",
+        source_platform_url: pageUrl || "",
+        timestamp_collected: now,
+        captured_at: nowIso,
+        operation: op,
+        topic: topic || null,
+      },
     });
   }
 
@@ -132,15 +141,17 @@ async function handleSessionEnd() {
   const records = dedupById(store[DATA_KEY] || []);
 
   if (cfg.autoExport && records.length) {
-    const ndjson = records.map((r) => JSON.stringify(r)).join("\n") + "\n";
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     try {
       if (cfg.exportDest === "4cat" && cfg.fourcatUrl) {
-        const res = await uploadTo4cat(cfg.fourcatUrl, ndjson);
+        // 4CAT gets the raw Zeeschuimer-format records as-is.
+        const raw = records.map((r) => JSON.stringify(r)).join("\n") + "\n";
+        const res = await uploadTo4cat(cfg.fourcatUrl, raw);
         if (DEBUG) console.log("[xcap] 4CAT upload result:", res);
       } else {
-        // Build the file in the worker via a data: URL (no createObjectURL here).
-        const url = "data:application/x-ndjson;base64," + b64utf8(ndjson);
+        // The downloaded file gets the simplified, derived schema.
+        const simple = records.map((r) => JSON.stringify(projectSimplified(r))).join("\n") + "\n";
+        const url = "data:application/x-ndjson;base64," + b64utf8(simple);
         await chrome.downloads.download({ url, filename: `x_capture_${stamp}.ndjson`, saveAs: false });
       }
     } catch (e) {

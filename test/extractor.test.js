@@ -7,8 +7,10 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const { extractTweets, opName, topicFromUrl, unwrapTweet, resolveText, screenName } =
-  require("../extractor.js");
+const {
+  extractTweets, extractRaw, projectSimplified,
+  opName, topicFromUrl, unwrapTweet, resolveText, screenName,
+} = require("../extractor.js");
 
 function load(name) {
   const p = path.join(__dirname, "..", "fixtures", name);
@@ -104,6 +106,38 @@ test("thread detail: pin entry + module items[] are all captured", () => {
   assert.equal(m.get("4001").screen_name, "judy"); // normal entry, legacy handle
   assert.equal(m.get("4002").screen_name, "mallory"); // module items[] path
   assert.match(m.get("4002").full_text, /module items\[\] array/);
+});
+
+test("extractRaw returns the full raw tweet nodes, deduped", () => {
+  const raws = extractRaw(load("home_timeline.json"));
+  assert.equal(raws.length, 3); // alice, bob, carol — not the user/cursor
+  const alice = raws.find((n) => n.rest_id === "1001");
+  assert.ok(alice.legacy && alice.core, "raw node retains legacy + core (for 4CAT)");
+  assert.equal(alice.legacy.full_text, "Hello world from the timeline");
+});
+
+test("projectSimplified derives the schema + reads __import_meta provenance", () => {
+  const raws = extractRaw(load("home_timeline.json"));
+  const node = raws.find((n) => n.rest_id === "1001");
+  node.__import_meta = {
+    source_platform_url: "https://x.com/search?q=Gaza",
+    captured_at: "2026-06-02T00:00:00.000Z",
+    operation: "SearchTimeline",
+    topic: "Gaza",
+  };
+  const s = projectSimplified(node);
+  assert.equal(s.id, "1001");
+  assert.equal(s.full_text, "Hello world from the timeline");
+  assert.equal(s.topic, "Gaza");
+  assert.equal(s.source_url, "https://x.com/search?q=Gaza");
+  assert.equal(s.operation, "SearchTimeline");
+  assert.equal(s.captured_at, "2026-06-02T00:00:00.000Z");
+
+  // no meta → provenance nulls, core fields still derived
+  const carol = projectSimplified(raws.find((n) => n.rest_id === "1003"));
+  assert.equal(carol.topic, null);
+  assert.equal(carol.source_url, null);
+  assert.equal(carol.screen_name, "carol");
 });
 
 test("dedup within a single response", () => {

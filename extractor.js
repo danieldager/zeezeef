@@ -49,7 +49,10 @@ function screenName(tweet) {
   return null;
 }
 
-function extractTweets(root) {
+// Walk the parsed JSON and collect the RAW Tweet objects (deduped by id within
+// this response). Returns references to the full tweet nodes — this is what
+// gets stored and what 4CAT's importer needs.
+function extractRaw(root) {
   const out = [];
   const seenLocal = new Set();
 
@@ -65,27 +68,7 @@ function extractTweets(root) {
       const id = node.rest_id || node.legacy.id_str;
       if (id && !seenLocal.has(id)) {
         seenLocal.add(id);
-
-        // Retweet wrapper: the wrapper's own full_text is the truncated
-        // "RT @user: …" form. Resolve to the embedded original's full text so
-        // the dataset carries clean content. The inner original is also walked
-        // and captured under its own id (faithful "feed as experienced").
-        const rtInner =
-          node.legacy.retweeted_status_result &&
-          unwrapTweet(node.legacy.retweeted_status_result.result);
-        const text = (rtInner ? resolveText(rtInner) : null) || resolveText(node);
-
-        const replyTo = node.legacy.in_reply_to_status_id_str || null;
-        out.push({
-          id,
-          full_text: text,
-          screen_name: screenName(node),
-          created_at: node.legacy.created_at || null,
-          lang: node.legacy.lang || null,
-          conversation_id: node.legacy.conversation_id_str || null,
-          is_reply: !!replyTo,
-          reply_to: replyTo,
-        });
+        out.push(node);
       }
     }
 
@@ -97,6 +80,43 @@ function extractTweets(root) {
   })(root);
 
   return out;
+}
+
+// Project a stored record (a raw Tweet node, optionally carrying __import_meta
+// provenance) down to the simplified, analysis-friendly schema.
+function projectSimplified(node) {
+  if (!node || typeof node !== "object" || !node.legacy) return null;
+  const id = node.rest_id || node.legacy.id_str;
+  if (!id) return null;
+
+  // Retweet wrapper: resolve to the embedded original's full text rather than
+  // the truncated "RT @user: …" form. The inner original is captured separately.
+  const rtInner =
+    node.legacy.retweeted_status_result &&
+    unwrapTweet(node.legacy.retweeted_status_result.result);
+  const text = (rtInner ? resolveText(rtInner) : null) || resolveText(node);
+
+  const replyTo = node.legacy.in_reply_to_status_id_str || null;
+  const meta = node.__import_meta || {};
+  return {
+    id,
+    full_text: text,
+    screen_name: screenName(node),
+    created_at: node.legacy.created_at || null,
+    lang: node.legacy.lang || null,
+    conversation_id: node.legacy.conversation_id_str || null,
+    is_reply: !!replyTo,
+    reply_to: replyTo,
+    captured_at: meta.captured_at || null,
+    source_url: meta.source_platform_url || null,
+    operation: meta.operation || null,
+    topic: meta.topic || null,
+  };
+}
+
+// Convenience: raw extraction + projection in one (used by the unit tests).
+function extractTweets(root) {
+  return extractRaw(root).map(projectSimplified).filter(Boolean);
 }
 
 // Pull the GraphQL OperationName from the request URL:
@@ -123,5 +143,8 @@ function topicFromUrl(url) {
 // Dual environment: CommonJS (Node tests) gets named exports; the service
 // worker (classic importScripts) just sees these as globals and skips this.
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { extractTweets, opName, topicFromUrl, unwrapTweet, resolveText, screenName };
+  module.exports = {
+    extractTweets, extractRaw, projectSimplified,
+    opName, topicFromUrl, unwrapTweet, resolveText, screenName,
+  };
 }
