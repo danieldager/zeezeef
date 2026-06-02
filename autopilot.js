@@ -41,6 +41,49 @@
     chrome.storage.local.get(k).then((o) => o[k]).catch(() => undefined);
   const setRun = (run) => chrome.storage.local.set({ [RUN_KEY]: run }).catch(() => {});
 
+  // --- human-like motion -----------------------------------------------------
+  // Standard normal (Box–Muller) → log-normal pause sampler. Human inter-action
+  // delays follow a log-normal distribution (a long right tail of reading
+  // pauses), NOT the uniform jitter a naive bot uses — a documented behavioral
+  // tell. Median tracks cadenceSec; clamped to sane bounds.
+  function gaussian() {
+    let u = 0, v = 0;
+    while (!u) u = Math.random();
+    while (!v) v = Math.random();
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  }
+  function humanPause(cfg) {
+    const median = Math.max(400, cfg.cadenceSec * 1000);
+    return Math.min(30000, Math.max(300, median * Math.exp(0.6 * gaussian())));
+  }
+
+  // Varied scroll distance: mostly a medium swipe, sometimes a small nudge,
+  // occasionally a big jump — humans don't move a fixed amount each time.
+  function scrollDistance() {
+    const vh = window.innerHeight;
+    const r = Math.random();
+    if (r < 0.15) return vh * (0.2 + Math.random() * 0.25); // small
+    if (r < 0.85) return vh * (0.5 + Math.random() * 0.45); // medium (common)
+    return vh * (1.1 + Math.random() * 0.7); // occasional large
+  }
+
+  // Eased scroll (accelerate → peak → decelerate) as many small steps, so the
+  // scroll-event stream has a human velocity profile rather than one jump.
+  async function smoothScrollBy(dy) {
+    const steps = 10 + Math.floor(Math.random() * 10); // 10–19
+    const dur = 220 + Math.random() * 500; // ~0.22–0.72s total
+    let moved = 0;
+    for (let i = 1; i <= steps; i++) {
+      if (aborted) return;
+      const t = i / steps;
+      const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; // easeInOutQuad
+      const target = Math.round(dy * eased);
+      window.scrollBy(0, target - moved);
+      moved = target;
+      await sleep((dur / steps) * (0.6 + Math.random() * 0.8));
+    }
+  }
+
   // Ask the background worker for our own tab id (content scripts can't read it).
   function myTabId() {
     return chrome.runtime
@@ -174,7 +217,16 @@
         continue;
       }
 
-      window.scrollBy(0, Math.round(window.innerHeight * (0.7 + Math.random() * 0.25)));
+      // Occasional re-read: a small scroll back up, then a pause (humans do
+      // this; bots don't). Not counted as forward progress.
+      if (Math.random() < 0.12) {
+        await smoothScrollBy(-window.innerHeight * (0.2 + Math.random() * 0.25));
+        if (aborted) return "abort";
+        await sleep(humanPause(cfg));
+        continue;
+      }
+
+      await smoothScrollBy(scrollDistance());
       n++;
 
       const h = scroller.scrollHeight;
@@ -186,8 +238,7 @@
       }
       lastH = h;
 
-      const base = cfg.cadenceSec * 1000;
-      await sleep(jitter(n % 7 === 0 ? base * 3 : base));
+      await sleep(humanPause(cfg)); // log-normal reading pause, not uniform jitter
     }
     return "done";
   }
