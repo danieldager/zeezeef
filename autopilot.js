@@ -83,13 +83,18 @@
     if (Date.now() - run.startedAt > cfg.sessionMaxMin * 60000)
       return stop("session time cap reached");
     if ((run.visited || 0) >= cfg.maxTopics) return stop("max topics reached");
-    if (onBlockedPage()) return stop("hit a login / verify / suspended page — stopping");
+    if (isChallenged()) return stop("hit a verification / rate-limit challenge — stopped to protect the account");
 
-    // Trending: seed the queue from the Explore page's live trends.
+    // Trending: seed the queue from the "What's happening" trends (the short
+    // terms in the right sidebar — same cells as the Explore "Trending" tab).
+    // We read them off /home, not /explore (whose default "For you" tab is
+    // curated news with long headlines that don't work as plain searches).
     if (cfg.mode === "trending" && (!run.queue || run.queue.length === 0)) {
-      if (!onExplore()) return go("https://x.com/explore");
       const trends = await readTrends(cfg.maxTopics);
-      if (!trends.length) return stop("no trends found on Explore");
+      if (!trends.length) {
+        if (location.pathname !== "/home") return go("https://x.com/home");
+        return stop("couldn't read the 'What's happening' trends — widen the window, or use Manual mode");
+      }
       run.queue = trends;
       run.idx = 0;
       await setRun(run);
@@ -134,6 +139,8 @@
       if (n % 5 === 0) {
         const r = await getLocal(RUN_KEY);
         if (!r || !r.running) return;
+        if (isChallenged())
+          return stop("hit a verification / rate-limit challenge — stopped to protect the account");
         if (Date.now() - r.startedAt > cfg.sessionMaxMin * 60000)
           return stop("session time cap reached");
       }
@@ -160,37 +167,47 @@
     try { location.assign(url); } catch (_) {}
   }
 
-  function onExplore() {
-    return location.pathname.startsWith("/explore");
-  }
-  function onBlockedPage() {
-    return /^\/(i\/flow|account\/access|login|logout|suspended)/.test(location.pathname);
+  // Stop the instant X challenges the session. Pushing through a captcha /
+  // verification is exactly what escalates a flag into a suspension, so we halt
+  // on the first sign: a challenge URL, or a Cloudflare/Arkose human-check frame.
+  function isChallenged() {
+    if (/^\/(i\/flow|account\/access|login|logout|suspended)/.test(location.pathname)) return true;
+    try {
+      if (
+        document.querySelector(
+          'iframe[src*="challenges.cloudflare.com"], iframe[src*="arkoselabs"], iframe[title*="human" i]'
+        )
+      )
+        return true;
+    } catch (_) {}
+    return false;
   }
 
-  // Read the rendered trends off the Explore page. Markup-dependent — this is a
-  // maintenance point (like the GraphQL extractor). Falls back to building a
-  // /search URL from the trend label when no anchor is present.
+  // Read the rendered trend terms (the "What's happening" cells). Markup-
+  // dependent — this is a maintenance point (like the GraphQL extractor). Each
+  // becomes a plain search, exactly like clicking the trend: /search?q=<term>.
   async function readTrends(limit) {
     await waitFor('[data-testid="trend"]', 8000);
     const out = [], seen = new Set();
     document.querySelectorAll('[data-testid="trend"]').forEach((el) => {
-      const label = pickTrendName((el.innerText || "").split("\n").map((s) => s.trim()).filter(Boolean));
-      if (!label) return;
-      const a = el.querySelector('a[href*="/search"]');
-      const url = a ? a.href : `https://x.com/search?q=${encodeURIComponent(label)}&src=trend_click&f=live`;
+      const name = pickTrendName((el.innerText || "").split("\n").map((s) => s.trim()).filter(Boolean));
+      if (!name) return;
+      const url = `https://x.com/search?q=${encodeURIComponent(name)}&src=trend_click`;
       if (seen.has(url)) return;
       seen.add(url);
-      out.push({ label, url });
+      out.push({ label: name, url });
     });
     return out.slice(0, limit);
   }
 
-  // A trend cell shows ~3 lines: category ("… · Trending"), the name, and a post
-  // count. Drop the boilerplate; the first remaining line is the trend name.
+  // A trend cell shows ~3 lines: a category ("… · Trending" / "Trending in …"),
+  // the short trend term, and a post count. Drop the boilerplate, then take the
+  // first SHORT remaining line — the term. The length cap rejects the long
+  // headlines of curated news/event cards (which aren't usable as searches).
   function pickTrendName(lines) {
-    const drop = /(^trending$|trending in|^promoted$|posts$|^\d[\d.,]*\s*(k|m)?\s*posts|^·|^\d+$)/i;
-    const cand = lines.filter((l) => !drop.test(l));
-    return cand[0] || null;
+    const drop = /(trending|^promoted$|posts$|^\d[\d.,]*\s*(k|m)?$|^·|^\d+$)/i;
+    const cand = lines.filter((l) => l && !drop.test(l));
+    return cand.find((l) => l.length <= 50) || null;
   }
 
   function waitFor(sel, timeoutMs) {
