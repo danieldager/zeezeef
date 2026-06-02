@@ -25,19 +25,27 @@
     manualTopics: [],
     dwellSec: 90, // scroll each topic this long
     cadenceSec: 2, // base seconds between scroll steps
-    maxTopics: 10, // stop after this many topics
-    sessionMaxMin: 30, // hard wall-clock cap for the whole run
-    loop: false, // when the queue is exhausted, start over (refresh trends)
+    sessionMaxMin: 30, // time budget for the whole run
+    targetPosts: 0, // finish once this many posts are captured (0 = no count target)
     threadDives: true, // occasionally dip into a comment thread, then return
     threadDwellSec: 20, // how long to scroll inside a thread
     skimBursts: true, // occasionally rip past a batch of posts, then stop
     burstChance: 0.1, // probability of a skim burst per scroll step
     burstLenMin: 3, // fast scrolls per burst (min)
     burstLenMax: 8, // fast scrolls per burst (max)
+    // session-end actions (performed by background.js)
+    autoExport: false, // dump captured posts when a session finishes
+    exportDest: "file", // "file" | "4cat"
+    fourcatUrl: "http://localhost:4444",
+    autoReset: true, // clear the store after a finished session
+    autoRestart: false, // start another session automatically
   };
+  const TRENDS_PER_CYCLE = 20; // trends to read per trending cycle
+  const DATA_KEY = "captured"; // capture store (read for the post target)
 
   let aborted = false; // module-local instant abort (badge / stop message)
   let busy = false; // guard against overlapping drive() runs
+  let paceFactor = 1; // adaptive-speed multiplier on pauses (<1 = faster when behind)
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const jitter = (ms, f = 0.4) => Math.max(250, ms * (1 + (Math.random() * 2 - 1) * f));
@@ -141,11 +149,12 @@
     const myId = await myTabId();
     if (run.tabId != null && myId != null && run.tabId !== myId) return;
 
-    // Hard caps + stale-run guard (a run older than the session cap won't resume,
-    // e.g. after a browser restart).
+    // Stop conditions + stale-run guard (a run older than the time budget won't
+    // resume, e.g. after a browser restart).
     if (Date.now() - run.startedAt > cfg.sessionMaxMin * 60000)
-      return stop("session time cap reached");
-    if ((run.visited || 0) >= cfg.maxTopics) return stop("max topics reached");
+      return finishSession("time budget reached");
+    if (cfg.targetPosts > 0 && (await capturedCount()) >= cfg.targetPosts)
+      return finishSession("post target reached");
     if (isChallenged()) return stop("hit a verification / rate-limit challenge — stopped to protect the account");
 
     // Trending: seed the queue from the Explore → Trending tab (a dense list of
@@ -157,7 +166,7 @@
         await setRun(run);
         return go(TRENDING_URL);
       }
-      const trends = await readTrends(cfg.maxTopics);
+      const trends = await readTrends(TRENDS_PER_CYCLE);
       if (!trends.length)
         return stop("couldn't read the Trending tab — reload x.com and retry, or use Manual mode");
       run.queue = trends;
@@ -176,16 +185,16 @@
     if (!r || !r.running) { removeBadge(); return; }
     r.visited = (r.visited || 0) + 1;
 
-    if (cfg.mode === "current") return stop("done (single page)");
+    if (cfg.mode === "current") return finishSession("done (single page)");
 
     let next = r.idx + 1;
     if (next >= r.queue.length) {
-      if (cfg.loop && cfg.mode === "trending") {
+      // Loop: keep collecting until the time budget or post target is reached.
+      if (cfg.mode === "trending") {
         r.queue = []; r.idx = 0; r.seededFrom = false; await setRun(r);
-        return go(TRENDING_URL); // refresh trends
+        return go(TRENDING_URL); // refresh trends and sweep again
       }
-      if (cfg.loop && cfg.mode === "manual") next = 0;
-      else return stop("completed all topics");
+      next = 0; // manual: restart the list
     }
     r.idx = next;
     await setRun(r);
@@ -215,8 +224,23 @@
           const r = await getLocal(RUN_KEY);
           if (!r || !r.running) return "stop";
           if (Date.now() - r.startedAt > cfg.sessionMaxMin * 60000) {
-            stop("session time cap reached");
+            finishSession("time budget reached");
             return "stop";
+          }
+          if (cfg.targetPosts > 0) {
+            const have = await capturedCount();
+            if (have >= cfg.targetPosts) {
+              finishSession("post target reached");
+              return "stop";
+            }
+            // Adapt speed: pace toward the target. Behind → shorter pauses.
+            const elapsedMin = (Date.now() - r.startedAt) / 60000;
+            const remainMin = Math.max(0.2, cfg.sessionMaxMin - elapsedMin);
+            const required = (cfg.targetPosts - have) / remainMin; // posts/min still needed
+            const actual = have / Math.max(0.2, elapsedMin);
+            paceFactor = required > 0 ? Math.min(1.4, Math.max(0.35, actual / required)) : 1.4;
+          } else {
+            paceFactor = 1;
           }
         }
       }
@@ -246,7 +270,7 @@
           stale = 0;
         }
         lastH = h;
-        await sleep(humanPause(cfg)); // stop and read after the skim
+        await sleep(humanPause(cfg) * paceFactor); // stop and read after the skim
         continue;
       }
 
@@ -255,7 +279,7 @@
       if (Math.random() < 0.12) {
         await smoothScrollBy(-window.innerHeight * (0.2 + Math.random() * 0.25));
         if (aborted) return "abort";
-        await sleep(humanPause(cfg));
+        await sleep(humanPause(cfg) * paceFactor);
         continue;
       }
 
@@ -271,7 +295,7 @@
       }
       lastH = h;
 
-      await sleep(humanPause(cfg)); // log-normal reading pause, not uniform jitter
+      await sleep(humanPause(cfg) * paceFactor); // log-normal reading pause (scaled by pace)
     }
     return "done";
   }
@@ -398,6 +422,28 @@
     run.stoppedAt = Date.now();
     await setRun(run);
     removeBadge();
+  }
+
+  // Natural end of a session (post target / time budget / single page done).
+  // Stops, then hands the session-end actions (auto-export / reset / restart)
+  // to the background worker.
+  async function finishSession(reason) {
+    aborted = true;
+    const run = (await getLocal(RUN_KEY)) || {};
+    run.running = false;
+    run.reason = reason;
+    run.completed = true;
+    run.stoppedAt = Date.now();
+    await setRun(run);
+    removeBadge();
+    try {
+      chrome.runtime.sendMessage({ type: "autopilot_session_end" });
+    } catch (_) {}
+  }
+
+  async function capturedCount() {
+    const c = await getLocal(DATA_KEY);
+    return Array.isArray(c) ? c.length : 0;
   }
 
   function currentLabel(run, cfg) {

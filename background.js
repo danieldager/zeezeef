@@ -7,6 +7,7 @@ importScripts("extractor.js"); // provides extractTweets() and opName()
 const SEEN_KEY = "seen_ids";
 const DATA_KEY = "captured";
 const RUN_KEY = "autopilot_run"; // autopilot runtime state (for topic attribution)
+const CFG_KEY = "autopilot_cfg"; // autopilot settings (for session-end actions)
 const DEBUG = false; // flip true to log every capture to the SW console
 
 // ---------------------------------------------------------------------------
@@ -51,6 +52,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "autopilot_whoami") {
     sendResponse({ tabId: sender.tab && sender.tab.id });
     return true;
+  }
+
+  // A session finished (post target / time budget): run the end-of-session
+  // actions (export → reset → restart). Serialized so it doesn't race captures.
+  if (msg.type === "autopilot_session_end") {
+    enqueue(() => handleSessionEnd());
+    return false;
   }
 
   return false;
@@ -112,4 +120,105 @@ async function handlePayload(bodyText, apiUrl, pageUrl) {
       `[xcap] ${op || "?"} +${fresh.length} (total ${captured.length + fresh.length})`
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Session-end actions (auto-export → reset → restart), run in the worker so
+// they fire even with the popup closed.
+// ---------------------------------------------------------------------------
+async function handleSessionEnd() {
+  const store = await chrome.storage.local.get([CFG_KEY, DATA_KEY, RUN_KEY]);
+  const cfg = store[CFG_KEY] || {};
+  const records = dedupById(store[DATA_KEY] || []);
+
+  if (cfg.autoExport && records.length) {
+    const ndjson = records.map((r) => JSON.stringify(r)).join("\n") + "\n";
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    try {
+      if (cfg.exportDest === "4cat" && cfg.fourcatUrl) {
+        const res = await uploadTo4cat(cfg.fourcatUrl, ndjson);
+        if (DEBUG) console.log("[xcap] 4CAT upload result:", res);
+      } else {
+        // Build the file in the worker via a data: URL (no createObjectURL here).
+        const url = "data:application/x-ndjson;base64," + b64utf8(ndjson);
+        await chrome.downloads.download({ url, filename: `x_capture_${stamp}.ndjson`, saveAs: false });
+      }
+    } catch (e) {
+      console.error("[xcap] session-end export failed:", e);
+    }
+  }
+
+  if (cfg.autoReset) {
+    await chrome.storage.local.set({ [SEEN_KEY]: [], [DATA_KEY]: [] });
+  }
+
+  if (cfg.autoRestart) {
+    const run = store[RUN_KEY] || {};
+    const tabId = run.tabId;
+    const fresh = {
+      running: true,
+      startedAt: Date.now(),
+      tabId: tabId != null ? tabId : null,
+      queue:
+        cfg.mode === "manual"
+          ? (cfg.manualTopics || []).map((t) => ({
+              label: t,
+              url: `https://x.com/search?q=${encodeURIComponent(t)}&src=typed_query&f=live`,
+            }))
+          : [],
+      idx: 0,
+      visited: 0,
+      reason: null,
+      seededFrom: false,
+    };
+    await chrome.storage.local.set({ [RUN_KEY]: fresh });
+    if (tabId != null) {
+      try {
+        await chrome.tabs.sendMessage(tabId, { type: "autopilot_start" });
+      } catch (_) {}
+    }
+  }
+}
+
+function dedupById(records) {
+  const seen = new Set();
+  const out = [];
+  for (const r of records) {
+    if (!r || seen.has(r.id)) continue;
+    seen.add(r.id);
+    out.push(r);
+  }
+  return out;
+}
+
+// UTF-8-safe base64 for the data: URL (btoa alone corrupts non-Latin text).
+function b64utf8(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(bin);
+}
+
+// Upload to a 4CAT instance using Zeeschuimer's protocol: POST the NDJSON to
+// /api/import-dataset/ with the platform header, then poll /api/check-query/.
+// Requires host permission for the 4CAT origin (localhost is in the manifest).
+async function uploadTo4cat(baseUrl, ndjson) {
+  const root = baseUrl.replace(/\/+$/, "");
+  const res = await fetch(root + "/api/import-dataset/", {
+    method: "POST",
+    headers: { "X-Zeeschuimer-Platform": "twitter" },
+    body: ndjson,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (data && data.key) {
+    const pollUrl = root + "/api/check-query/?key=" + encodeURIComponent(data.key);
+    for (let i = 0; i < 60; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const p = await fetch(pollUrl).then((x) => x.json()).catch(() => null);
+      if (p && p.done) return p;
+    }
+  }
+  return data;
 }
