@@ -41,6 +41,7 @@
   };
   const TRENDS_PER_CYCLE = 20; // trends to read per trending cycle
   const DATA_KEY = "captured"; // capture store (read for the post target)
+  const MIN_THREAD_REPLIES = 10; // only dive into posts with at least this many replies
 
   let aborted = false; // module-local instant abort (badge / stop message)
   let busy = false; // guard against overlapping drive() runs
@@ -142,10 +143,11 @@
     // navigate-to-Trends step, before any scrolling starts.
     showBadge(currentLabel(run, cfg));
 
-    // Stop conditions + stale-run guard (a run older than the time budget won't
-    // resume, e.g. after a browser restart).
-    if (Date.now() - run.startedAt > cfg.sessionMaxMin * 60000)
-      return finishSession("time budget reached");
+    // Stop conditions + stale-run guard. With a post target the time extends to
+    // a 2 h safety cap, so it can keep going (steadily) until the target is met.
+    const capMin = cfg.targetPosts > 0 ? Math.max(cfg.sessionMaxMin, 120) : cfg.sessionMaxMin;
+    if (Date.now() - run.startedAt > capMin * 60000)
+      return finishSession(cfg.targetPosts > 0 ? "safety cap (2 h) reached" : "time budget reached");
     if (cfg.targetPosts > 0 && (await capturedCount()) >= cfg.targetPosts)
       return finishSession("post target reached");
     if (isChallenged()) return stop("hit a verification / rate-limit challenge — stopped to protect the account");
@@ -170,7 +172,10 @@
     }
 
     showBadge(currentLabel(run, cfg));
-    const res = await scrollPage(cfg.dwellSec * 1000, cfg, { allowDives: true, checkRun: true });
+    // With a post target, scroll each topic deeper (until the feed runs dry, up
+    // to ~4 min) so it harvests more per topic at a steady pace.
+    const dwellMs = (cfg.targetPosts > 0 ? Math.max(cfg.dwellSec, 240) : cfg.dwellSec) * 1000;
+    const res = await scrollPage(dwellMs, cfg, { allowDives: true, checkRun: true });
     if (aborted || res === "abort" || res === "stop") return;
 
     // Re-read: the user may have stopped mid-dwell.
@@ -229,8 +234,9 @@
         if (opts.checkRun) {
           const r = await getLocal(RUN_KEY);
           if (!r || !r.running) return "stop";
-          if (Date.now() - r.startedAt > cfg.sessionMaxMin * 60000) {
-            finishSession("time budget reached");
+          const capMin = cfg.targetPosts > 0 ? Math.max(cfg.sessionMaxMin, 120) : cfg.sessionMaxMin;
+          if (Date.now() - r.startedAt > capMin * 60000) {
+            finishSession(cfg.targetPosts > 0 ? "safety cap (2 h) reached" : "time budget reached");
             return "stop";
           }
           const have = await capturedCount();
@@ -244,10 +250,9 @@
           if (cfg.targetPosts > 0) {
             const remainMin = Math.max(0.2, cfg.sessionMaxMin - elapsedMin);
             const required = (cfg.targetPosts - have) / remainMin; // posts/min still needed
-            // Pace toward the required rate — speed up to catch up when behind,
-            // even past 100/min. The 100/min cap is on the planned parameters
-            // (feasibility check), not the live rate.
-            paceFactor = required > 0 ? Math.min(4, Math.max(0.35, rate / required)) : 4;
+            // Stay near a natural pace — catch up by scrolling longer/deeper
+            // (longer dwell, more topics), not by scrolling unnaturally fast.
+            paceFactor = required > 0 ? Math.min(1.4, Math.max(0.7, rate / required)) : 1.2;
           } else {
             paceFactor = 1; // no target → steady human pace
           }
@@ -308,8 +313,8 @@
   // current topic (background falls back to the run's topic on /status/ pages).
   async function threadDive(cfg) {
     try {
-      const link = pickVisibleTweetLink();
-      if (!link) return false;
+      const link = pickThreadLink(MIN_THREAD_REPLIES);
+      if (!link) return false; // no visible post with enough replies — skip the dive
       const fromPath = location.pathname;
       link.click(); // X's router handles the timestamp permalink → conversation
       const opened = await waitForCondition(() => /\/status\/\d+/.test(location.pathname), 4000);
@@ -325,17 +330,33 @@
     }
   }
 
-  // A visible post's timestamp permalink (it wraps a <time>) — the reliable route
-  // into a conversation; avoids reply/quote/media sub-links.
-  function pickVisibleTweetLink() {
-    const links = Array.from(
-      document.querySelectorAll('article[data-testid="tweet"] a[href*="/status/"]')
-    ).filter((a) => {
-      if (!a.querySelector("time")) return false;
-      const r = a.getBoundingClientRect();
-      return r.top > 80 && r.bottom < window.innerHeight - 80;
-    });
-    return links.length ? links[Math.floor(Math.random() * links.length)] : null;
+  // Pick a visible post with at least `minReplies` replies (worth diving into a
+  // real conversation), and return its timestamp permalink.
+  function pickThreadLink(minReplies) {
+    const arts = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+    const cands = [];
+    for (const art of arts) {
+      const r = art.getBoundingClientRect();
+      if (!(r.top > 80 && r.bottom < window.innerHeight - 80)) continue; // in view
+      if (replyCount(art) < minReplies) continue;
+      const t = art.querySelector('a[href*="/status/"] time');
+      const link = t ? t.closest("a") : art.querySelector('a[href*="/status/"]');
+      if (link) cands.push(link);
+    }
+    return cands.length ? cands[Math.floor(Math.random() * cands.length)] : null;
+  }
+
+  // Reply count from a post's reply button (handles "1.2K"-style counts).
+  function replyCount(article) {
+    const btn = article.querySelector('[data-testid="reply"]');
+    if (!btn) return 0;
+    const txt = ((btn.getAttribute("aria-label") || "") + " " + (btn.textContent || "")).replace(/,/g, "");
+    const m = /([\d.]+)\s*([km])?/i.exec(txt);
+    if (!m) return 0;
+    let n = parseFloat(m[1]) || 0;
+    if (/k/i.test(m[2] || "")) n *= 1e3;
+    if (/m/i.test(m[2] || "")) n *= 1e6;
+    return n;
   }
 
   function waitForCondition(fn, timeoutMs) {

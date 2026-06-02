@@ -91,21 +91,21 @@ function checkFeasibility() {
   const time = clampNum(ap.time.value, 1, 600, 30);
   const target = clampNum(ap.target.value, 0, 1000000, 0);
   const warn = [];
-  if (time > 120) warn.push(`Session is ${time} min (over 2 h) — long automated runs raise account risk.`);
+  if (time > 120) warn.push(`Session over 2 h — long automated runs raise account risk.`);
   if (target > 0) {
     const required = target / time;
     const minTime = Math.ceil(target / MAX_RATE);
-    if (required > MAX_RATE) {
-      warn.push(`~${Math.round(required)}/min needed to reach ${target} in ${time} min — above the ${MAX_RATE}/min cap, so it will fall short. Raise time to ≥ ${minTime} min, or lower the target.`);
-    } else if (minTime > 120) {
-      warn.push(`Even at ${MAX_RATE}/min, ${target} posts takes ~${minTime} min (over 2 h).`);
+    if (minTime > 120) {
+      warn.push(`${target} posts may exceed the 2-hour cap even at a brisk pace — it'll stop at 2 h.`);
+    } else if (required > MAX_RATE) {
+      warn.push(`~${Math.round(required)}/min needed for ${time} min (over ${MAX_RATE}/min) — it'll keep going past ${time} min to reach ${target} (up to 2 h).`);
     }
   }
   if (warn.length) {
     ap.feasibility.textContent = "⚠ " + warn.join(" ");
     ap.feasibility.className = "warn";
   } else if (target > 0) {
-    ap.feasibility.textContent = `Target pace ~${Math.round(target / time)}/min. Stops at ${target} posts or ${time} min.`;
+    ap.feasibility.textContent = `Runs until ${target} posts (~${time} min at ${Math.round(target / time)}/min; extends up to 2 h if the feed is slower).`;
     ap.feasibility.className = "hint";
   } else {
     ap.feasibility.textContent = `No post target — runs at a steady pace for ${time} min.`;
