@@ -105,10 +105,10 @@ function checkFeasibility() {
     ap.feasibility.textContent = "⚠ " + warn.join(" ");
     ap.feasibility.className = "warn";
   } else if (target > 0) {
-    ap.feasibility.textContent = `Target pace ~${Math.round(target / time)}/min (cap ${MAX_RATE}/min). Stops at ${target} posts or ${time} min.`;
+    ap.feasibility.textContent = `Target pace ~${Math.round(target / time)}/min. Stops at ${target} posts or ${time} min.`;
     ap.feasibility.className = "hint";
   } else {
-    ap.feasibility.textContent = `No post target — runs for ${time} min (capped at ${MAX_RATE}/min).`;
+    ap.feasibility.textContent = `No post target — runs at a steady pace for ${time} min.`;
     ap.feasibility.className = "hint";
   }
 }

@@ -41,7 +41,6 @@
   };
   const TRENDS_PER_CYCLE = 20; // trends to read per trending cycle
   const DATA_KEY = "captured"; // capture store (read for the post target)
-  const MAX_RATE = 100; // hard cap on captured posts per minute
 
   let aborted = false; // module-local instant abort (badge / stop message)
   let busy = false; // guard against overlapping drive() runs
@@ -245,11 +244,12 @@
           if (cfg.targetPosts > 0) {
             const remainMin = Math.max(0.2, cfg.sessionMaxMin - elapsedMin);
             const required = (cfg.targetPosts - have) / remainMin; // posts/min still needed
-            const targetRate = Math.min(required, MAX_RATE);
-            paceFactor = targetRate > 0 ? Math.min(4, Math.max(0.35, rate / targetRate)) : 4;
+            // Pace toward the required rate — speed up to catch up when behind,
+            // even past 100/min. The 100/min cap is on the planned parameters
+            // (feasibility check), not the live rate.
+            paceFactor = required > 0 ? Math.min(4, Math.max(0.35, rate / required)) : 4;
           } else {
-            // no target: normal pace, but slow down if over the cap
-            paceFactor = rate > MAX_RATE ? Math.min(4, rate / MAX_RATE) : 1;
+            paceFactor = 1; // no target → steady human pace
           }
           updateBadgeRate(rate);
         }
