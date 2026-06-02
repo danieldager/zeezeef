@@ -77,6 +77,7 @@ async function handlePayload(bodyText, apiUrl, pageUrl) {
   const captured = store[DATA_KEY] || [];
 
   const op = opName(apiUrl);
+  const topic = topicFromUrl(pageUrl); // the search/trend term, or null
   const now = new Date().toISOString();
 
   const fresh = [];
@@ -88,6 +89,7 @@ async function handlePayload(bodyText, apiUrl, pageUrl) {
       captured_at: now,
       source_url: pageUrl || "",
       operation: op,
+      topic,
     });
   }
 

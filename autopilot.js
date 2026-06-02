@@ -24,8 +24,8 @@
     manualTopics: [],
     dwellSec: 90, // scroll each topic this long
     cadenceSec: 2, // base seconds between scroll steps
-    maxTopics: 8, // stop after this many topics
-    sessionMaxMin: 20, // hard wall-clock cap for the whole run
+    maxTopics: 10, // stop after this many topics
+    sessionMaxMin: 30, // hard wall-clock cap for the whole run
     loop: false, // when the queue is exhausted, start over (refresh trends)
   };
 

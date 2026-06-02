@@ -54,7 +54,7 @@ and Chromium-based browsers (Edge, Brave, Vivaldi) — see
 One JSON object per line, UTF-8, newline-separated, one line per unique post:
 
 ```json
-{"id":"1234567890","full_text":"the post text, untruncated","screen_name":"someuser","created_at":"Wed Mar 12 09:00:00 +0000 2025","lang":"en","conversation_id":"1234500000","captured_at":"2025-03-12T09:01:23.456Z","operation":"UserTweets","source_url":"https://x.com/someuser"}
+{"id":"1234567890","full_text":"the post text, untruncated","screen_name":"someuser","created_at":"Wed Mar 12 09:00:00 +0000 2025","lang":"en","conversation_id":"1234500000","captured_at":"2025-03-12T09:01:23.456Z","operation":"SearchTimeline","source_url":"https://x.com/search?q=Israel&src=trend_click","topic":"Israel"}
 ```
 
 | Field | Meaning |
@@ -68,6 +68,7 @@ One JSON object per line, UTF-8, newline-separated, one line per unique post:
 | `captured_at` | ISO time the extension saw it (provenance) |
 | `operation` | Which GraphQL operation delivered it (provenance) |
 | `source_url` | The page URL you were on (provenance — "what you saw, where") |
+| `topic` | The search query the post was collected under (e.g. an autopilot trend term), or `null` for non-search browsing |
 
 ---
 

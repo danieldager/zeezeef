@@ -7,7 +7,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const { extractTweets, opName, unwrapTweet, resolveText, screenName } =
+const { extractTweets, opName, topicFromUrl, unwrapTweet, resolveText, screenName } =
   require("../extractor.js");
 
 function load(name) {
@@ -138,6 +138,17 @@ test("opName parses the GraphQL operation name", () => {
   assert.equal(opName(""), null);
   assert.equal(opName(undefined), null);
   assert.equal(opName("https://x.com/home"), null);
+});
+
+test("topicFromUrl extracts the search query a post was collected under", () => {
+  assert.equal(topicFromUrl("https://x.com/search?q=Israel&src=trend_click"), "Israel");
+  assert.equal(topicFromUrl("https://x.com/search?q=State%20of%20Play&f=live"), "State of Play");
+  assert.equal(topicFromUrl("https://x.com/search?q=%23climate"), "#climate");
+  assert.equal(topicFromUrl("https://x.com/home"), null);
+  assert.equal(topicFromUrl("https://x.com/someuser/status/123"), null);
+  assert.equal(topicFromUrl("https://x.com/search?q="), null);
+  assert.equal(topicFromUrl(""), null);
+  assert.equal(topicFromUrl(undefined), null);
 });
 
 test("helpers: unwrapTweet, resolveText, screenName", () => {

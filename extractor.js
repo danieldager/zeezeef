@@ -103,8 +103,22 @@ function opName(url) {
   return m ? m[1] : null;
 }
 
+// The search query a post was collected under — the `q` of a /search page URL
+// (for autopilot trending, exactly the trend term we navigated to). null for
+// non-search browsing (home, profiles, threads). Decoding is automatic.
+function topicFromUrl(url) {
+  try {
+    const u = new URL(url);
+    if (u.pathname === "/search") {
+      const q = u.searchParams.get("q");
+      return q && q.trim() ? q.trim() : null;
+    }
+  } catch (_) {}
+  return null;
+}
+
 // Dual environment: CommonJS (Node tests) gets named exports; the service
 // worker (classic importScripts) just sees these as globals and skips this.
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { extractTweets, opName, unwrapTweet, resolveText, screenName };
+  module.exports = { extractTweets, opName, topicFromUrl, unwrapTweet, resolveText, screenName };
 }

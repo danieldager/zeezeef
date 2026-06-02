@@ -107,8 +107,8 @@ function readCfg() {
     manualTopics: ap.manual.value.split(/[\n,]/).map((s) => s.trim()).filter(Boolean),
     dwellSec: clampNum(ap.dwell.value, 10, 3600, 90),
     cadenceSec: clampNum(ap.cadence.value, 0.5, 30, 2),
-    maxTopics: clampNum(ap.maxTopics.value, 1, 100, 8),
-    sessionMaxMin: clampNum(ap.sessionMax.value, 1, 240, 20),
+    maxTopics: clampNum(ap.maxTopics.value, 1, 100, 10),
+    sessionMaxMin: clampNum(ap.sessionMax.value, 1, 240, 30),
     loop: ap.loop.checked,
   };
 }
