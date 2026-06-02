@@ -30,7 +30,6 @@
     threadDives: true, // occasionally dip into a comment thread, then return
     threadDwellSec: 20, // how long to scroll inside a thread
     skimBursts: true, // occasionally rip past a batch of posts, then stop
-    burstChance: 0.1, // probability of a skim burst per scroll step
     burstLenMin: 3, // fast scrolls per burst (min)
     burstLenMax: 8, // fast scrolls per burst (max)
     // session-end actions (performed by background.js)
@@ -67,16 +66,6 @@
   function humanPause(cfg) {
     const median = Math.max(400, cfg.cadenceSec * 1000);
     return Math.min(30000, Math.max(300, median * Math.exp(0.6 * gaussian())));
-  }
-
-  // Varied scroll distance: mostly a medium swipe, sometimes a small nudge,
-  // occasionally a big jump — humans don't move a fixed amount each time.
-  function scrollDistance() {
-    const vh = window.innerHeight;
-    const r = Math.random();
-    if (r < 0.15) return vh * (0.2 + Math.random() * 0.25); // small
-    if (r < 0.85) return vh * (0.5 + Math.random() * 0.45); // medium (common)
-    return vh * (1.1 + Math.random() * 0.7); // occasional large
   }
 
   // Eased scroll (accelerate → peak → decelerate) as many small steps, so the
@@ -201,21 +190,34 @@
     go(r.queue[next].url);
   }
 
-  // Scroll the current page for `durationMs` with human-ish jittered cadence, an
-  // end-of-feed backoff, and periodic abort / challenge / session-cap checks.
-  // With opts.allowDives, it occasionally dips into a comment thread and extends
-  // the window by the time spent there (so the feed still gets its full scroll).
+  // Scroll the current page for `durationMs`. The default beat is a STEADY scan
+  // (small smooth step + a short gap → continuous downward motion, like reading
+  // a feed). Occasionally a beat is instead: a STOP to read (sometimes opening a
+  // comment thread), a FAST burst down, or a small nudge BACK UP then a short
+  // stop. Periodic abort / challenge / target checks; adaptive pace.
   // Returns "abort" | "stop" | "exhausted" | "done".
   async function scrollPage(durationMs, cfg, opts = {}) {
     let end = Date.now() + durationMs;
     const scroller = document.scrollingElement || document.documentElement;
     let lastH = 0, stale = 0, n = 0, dives = 0;
-    let nextDiveAt = Date.now() + jitter(35000);
+
+    const P_STOP = 0.12; // pause to read (sometimes enter a thread)
+    const P_FAST = cfg.skimBursts ? 0.07 : 0; // fast scroll down
+    const P_BACK = 0.06; // nudge back up + short stop
+
+    // End-of-feed tracking after a downward move; true once exhausted.
+    const atEnd = () => {
+      const h = scroller.scrollHeight;
+      if (window.scrollY + window.innerHeight >= h - 200 && h === lastH) stale++;
+      else stale = 0;
+      lastH = h;
+      return stale >= 4;
+    };
 
     while (Date.now() < end) {
       if (aborted) return "abort";
 
-      if (n % 5 === 0) {
+      if (n % 6 === 0) {
         if (isChallenged()) {
           stop("hit a verification / rate-limit challenge — stopped to protect the account");
           return "stop";
@@ -233,10 +235,10 @@
               finishSession("post target reached");
               return "stop";
             }
-            // Adapt speed: pace toward the target. Behind → shorter pauses.
+            // Adapt speed: pace toward the target. Behind → shorter gaps/stops.
             const elapsedMin = (Date.now() - r.startedAt) / 60000;
             const remainMin = Math.max(0.2, cfg.sessionMaxMin - elapsedMin);
-            const required = (cfg.targetPosts - have) / remainMin; // posts/min still needed
+            const required = (cfg.targetPosts - have) / remainMin; // posts/min needed
             const actual = have / Math.max(0.2, elapsedMin);
             paceFactor = required > 0 ? Math.min(1.4, Math.max(0.35, actual / required)) : 1.4;
           } else {
@@ -245,57 +247,48 @@
         }
       }
 
-      // Occasional comment-thread dive (main feed only, capped per topic).
-      if (
-        opts.allowDives && cfg.threadDives && dives < 2 &&
-        Date.now() >= nextDiveAt && end - Date.now() > cfg.threadDwellSec * 1000 + 5000
-      ) {
-        const t0 = Date.now();
-        const dove = await threadDive(cfg);
-        if (aborted) return "abort";
-        if (dove) { dives++; end += Date.now() - t0; } // don't let the dive eat scroll time
-        nextDiveAt = Date.now() + jitter(35000);
+      const roll = Math.random();
+
+      // STOP — pause to read; sometimes drop into a comment thread.
+      if (roll < P_STOP) {
+        const canDive =
+          opts.allowDives && cfg.threadDives && dives < 2 &&
+          end - Date.now() > cfg.threadDwellSec * 1000 + 5000;
+        if (canDive && Math.random() < 0.5) {
+          const t0 = Date.now();
+          const dove = await threadDive(cfg);
+          if (aborted) return "abort";
+          if (dove) { dives++; end += Date.now() - t0; } // don't let it eat scroll time
+        } else {
+          await sleep(humanPause(cfg) * paceFactor); // reading stop
+        }
+        n++;
         continue;
       }
 
-      // Occasional fast skim: rip past a batch of posts, then stop and read.
-      if (cfg.skimBursts && Math.random() < cfg.burstChance) {
+      // FAST — rip downward past a batch, then a brief settle.
+      if (roll < P_STOP + P_FAST) {
         await skimBurst(cfg);
         if (aborted) return "abort";
         n++;
-        const h = scroller.scrollHeight;
-        if (window.scrollY + window.innerHeight >= h - 200 && h === lastH) {
-          if (++stale >= 4) return "exhausted";
-        } else {
-          stale = 0;
-        }
-        lastH = h;
-        await sleep(humanPause(cfg) * paceFactor); // stop and read after the skim
+        if (atEnd()) return "exhausted";
+        await sleep(humanPause(cfg) * 0.5 * paceFactor);
         continue;
       }
 
-      // Occasional re-read: a small scroll back up, then a pause (humans do
-      // this; bots don't). Not counted as forward progress.
-      if (Math.random() < 0.12) {
-        await smoothScrollBy(-window.innerHeight * (0.2 + Math.random() * 0.25));
+      // BACK — nudge up slightly, then a short stop.
+      if (roll < P_STOP + P_FAST + P_BACK) {
+        await smoothScrollBy(-window.innerHeight * (0.18 + Math.random() * 0.22));
         if (aborted) return "abort";
-        await sleep(humanPause(cfg) * paceFactor);
+        await sleep((600 + Math.random() * 1100) * paceFactor);
         continue;
       }
 
-      await smoothScrollBy(scrollDistance());
+      // STEADY scan — the default: a small smooth step + a short gap.
+      await smoothScrollBy(window.innerHeight * (0.4 + Math.random() * 0.35));
       n++;
-
-      const h = scroller.scrollHeight;
-      const atBottom = window.scrollY + window.innerHeight >= h - 200;
-      if (atBottom && h === lastH) {
-        if (++stale >= 4) return "exhausted"; // feed exhausted
-      } else {
-        stale = 0;
-      }
-      lastH = h;
-
-      await sleep(humanPause(cfg) * paceFactor); // log-normal reading pause (scaled by pace)
+      if (atEnd()) return "exhausted";
+      await sleep((150 + Math.random() * 350) * paceFactor);
     }
     return "done";
   }
