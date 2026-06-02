@@ -201,8 +201,20 @@ async function startAutopilot() {
     ap.status.textContent = "Add at least one topic.";
     return;
   }
+
+  // Need an x.com / twitter.com tab whose content script is present.
+  let tab = null;
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    tab = tabs[0] || null;
+  } catch {}
+  const onX = tab && tab.url && /^https?:\/\/(x|twitter)\.com\//.test(tab.url);
+  if (!onX) {
+    ap.status.textContent = "Open an x.com tab first, then Start.";
+    return;
+  }
+
   await chrome.storage.local.set({ [CFG_KEY]: cfg });
-  const tabId = await activeTabId();
   const queue =
     cfg.mode === "manual"
       ? cfg.manualTopics.map((t) => ({
@@ -211,15 +223,26 @@ async function startAutopilot() {
         }))
       : [];
   const run = {
-    running: true, startedAt: Date.now(), tabId: tabId ?? null,
+    running: true, startedAt: Date.now(), tabId: tab.id,
     queue, idx: 0, visited: 0, reason: null, seededFrom: false,
   };
   await chrome.storage.local.set({ [RUN_KEY]: run });
+
   try {
-    if (tabId != null) await chrome.tabs.sendMessage(tabId, { type: "autopilot_start" });
-    else ap.status.textContent = "Open an x.com tab, then Start.";
+    await chrome.tabs.sendMessage(tab.id, { type: "autopilot_start" });
   } catch {
-    ap.status.textContent = "Open an x.com tab, then Start.";
+    // The content script isn't live in this tab (typically the extension was
+    // updated but the tab wasn't reloaded). Reload it — the run state we just
+    // saved makes autopilot resume on its own once the fresh scripts load.
+    try {
+      ap.status.textContent = "Reloading the tab to start…";
+      await chrome.tabs.reload(tab.id);
+    } catch {
+      run.running = false;
+      run.reason = "couldn't start — reload the x.com tab and try again";
+      await chrome.storage.local.set({ [RUN_KEY]: run });
+      ap.status.textContent = "Reload the x.com tab, then Start.";
+    }
   }
   renderAutopilot();
 }
