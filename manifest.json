@@ -4,7 +4,12 @@
   "version": "0.1.0",
   "description": "Passively captures the text of X/Twitter posts you browse, for research. Exports NDJSON.",
   "permissions": ["storage", "unlimitedStorage", "downloads"],
-  "host_permissions": ["*://x.com/*", "*://twitter.com/*"],
+  "host_permissions": [
+    "*://x.com/*",
+    "*://twitter.com/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
   "background": { "service_worker": "background.js" },
   "action": {
     "default_popup": "popup.html",
@@ -33,6 +38,11 @@
       "run_at": "document_start",
       "world": "MAIN",
       "all_frames": true
+    },
+    {
+      "matches": ["*://x.com/*", "*://twitter.com/*"],
+      "js": ["autopilot.js"],
+      "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [

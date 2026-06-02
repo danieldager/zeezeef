@@ -7,8 +7,10 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const { extractTweets, opName, unwrapTweet, resolveText, screenName } =
-  require("../extractor.js");
+const {
+  extractTweets, extractRaw, projectSimplified,
+  opName, topicFromUrl, unwrapTweet, resolveText, screenName,
+} = require("../extractor.js");
 
 function load(name) {
   const p = path.join(__dirname, "..", "fixtures", name);
@@ -106,6 +108,38 @@ test("thread detail: pin entry + module items[] are all captured", () => {
   assert.match(m.get("4002").full_text, /module items\[\] array/);
 });
 
+test("extractRaw returns the full raw tweet nodes, deduped", () => {
+  const raws = extractRaw(load("home_timeline.json"));
+  assert.equal(raws.length, 3); // alice, bob, carol — not the user/cursor
+  const alice = raws.find((n) => n.rest_id === "1001");
+  assert.ok(alice.legacy && alice.core, "raw node retains legacy + core (for 4CAT)");
+  assert.equal(alice.legacy.full_text, "Hello world from the timeline");
+});
+
+test("projectSimplified derives the schema + reads __import_meta provenance", () => {
+  const raws = extractRaw(load("home_timeline.json"));
+  const node = raws.find((n) => n.rest_id === "1001");
+  node.__import_meta = {
+    source_platform_url: "https://x.com/search?q=Gaza",
+    captured_at: "2026-06-02T00:00:00.000Z",
+    operation: "SearchTimeline",
+    topic: "Gaza",
+  };
+  const s = projectSimplified(node);
+  assert.equal(s.id, "1001");
+  assert.equal(s.full_text, "Hello world from the timeline");
+  assert.equal(s.topic, "Gaza");
+  assert.equal(s.source_url, "https://x.com/search?q=Gaza");
+  assert.equal(s.operation, "SearchTimeline");
+  assert.equal(s.captured_at, "2026-06-02T00:00:00.000Z");
+
+  // no meta → provenance nulls, core fields still derived
+  const carol = projectSimplified(raws.find((n) => n.rest_id === "1003"));
+  assert.equal(carol.topic, null);
+  assert.equal(carol.source_url, null);
+  assert.equal(carol.screen_name, "carol");
+});
+
 test("dedup within a single response", () => {
   const dup = {
     a: { __typename: "Tweet", rest_id: "9", legacy: { full_text: "once" } },
@@ -138,6 +172,29 @@ test("opName parses the GraphQL operation name", () => {
   assert.equal(opName(""), null);
   assert.equal(opName(undefined), null);
   assert.equal(opName("https://x.com/home"), null);
+});
+
+test("flags replies/comments via in_reply_to_status_id_str", () => {
+  const root = {
+    a: { __typename: "Tweet", rest_id: "5", legacy: { full_text: "a reply", in_reply_to_status_id_str: "4" } },
+    b: { __typename: "Tweet", rest_id: "6", legacy: { full_text: "top-level post" } },
+  };
+  const m = byId(extractTweets(root));
+  assert.equal(m.get("5").is_reply, true);
+  assert.equal(m.get("5").reply_to, "4");
+  assert.equal(m.get("6").is_reply, false);
+  assert.equal(m.get("6").reply_to, null);
+});
+
+test("topicFromUrl extracts the search query a post was collected under", () => {
+  assert.equal(topicFromUrl("https://x.com/search?q=Israel&src=trend_click"), "Israel");
+  assert.equal(topicFromUrl("https://x.com/search?q=State%20of%20Play&f=live"), "State of Play");
+  assert.equal(topicFromUrl("https://x.com/search?q=%23climate"), "#climate");
+  assert.equal(topicFromUrl("https://x.com/home"), null);
+  assert.equal(topicFromUrl("https://x.com/someuser/status/123"), null);
+  assert.equal(topicFromUrl("https://x.com/search?q="), null);
+  assert.equal(topicFromUrl(""), null);
+  assert.equal(topicFromUrl(undefined), null);
 });
 
 test("helpers: unwrapTweet, resolveText, screenName", () => {
