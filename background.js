@@ -86,18 +86,17 @@ async function handlePayload(bodyText, apiUrl, pageUrl) {
   const captured = store[DATA_KEY] || [];
 
   const op = opName(apiUrl);
-  // topic from the /search URL; the home-feed interleave is its own bucket; on a
-  // thread-dive (/status/ page) fall back to the autopilot's current topic so
-  // dived-into comments are still attributed to the trend they came from.
+  // Attribution, most-specific first:
+  //  1. /search pages carry the exact query in the URL.
+  //  2. Home-timeline fetches are self-identifying by GraphQL op — timing-proof
+  //     (no dependence on when the driver stamps run.context after a nav).
+  //  3. Anything else during a run (notably thread-dive replies, op=TweetDetail,
+  //     no `q` in the /status URL) inherits the driver's stamped context — so a
+  //     dive off the home feed stays "(home feed)", not the last trend topic.
   let topic = topicFromUrl(pageUrl);
   const run = store[RUN_KEY];
-  let path = "";
-  try { path = new URL(pageUrl).pathname; } catch (_) {}
-  if (!topic && path === "/home") {
-    topic = "(home feed)";
-  } else if (!topic && run && run.running && run.queue && run.queue[run.idx]) {
-    topic = run.queue[run.idx].label;
-  }
+  if (!topic && /^Home(Latest)?Timeline$/.test(op || "")) topic = "(home feed)";
+  if (!topic && run && run.running && run.context) topic = run.context;
   const now = Date.now();
   const nowIso = new Date(now).toISOString();
 

@@ -23,7 +23,7 @@
   const HOME_CHANCE = 0.5; // odds of detouring to the home feed between topics
 
   const DEFAULTS = {
-    mode: "trending", // "trending" | "manual" | "current"
+    mode: "trending", // "trending" | "manual" | "home" | "current"
     manualTopics: [],
     dwellSec: 90, // scroll each topic this long
     cadenceSec: 2, // base seconds between scroll steps
@@ -177,7 +177,20 @@
       return go(trends[0].url);
     }
 
+    // Home mode: stay on the home timeline and scroll/dive, looping until the
+    // session ends. Navigate there once if we're not already on it.
+    if (cfg.mode === "home" && !onHome()) return go(HOME_URL);
+
     showBadge(currentLabel(run, cfg));
+
+    // Stamp what we're currently driving so the capture pipeline attributes posts
+    // correctly. Thread-dive replies have no `q` in their /status URL and inherit
+    // this context — the dive is a nested SPA nav that never re-runs step(), so
+    // whatever is stamped here holds for the whole dwell (e.g. dives off /home
+    // stay "(home feed)" rather than leaking the last trend topic).
+    run.context = contextTopic(run, cfg);
+    await setRun(run);
+
     // With a post target, scroll each topic deeper (until the feed runs dry, up
     // to ~4 min) so it harvests more per topic at a steady pace.
     const dwellMs = (cfg.targetPosts > 0 ? Math.max(cfg.dwellSec, 240) : cfg.dwellSec) * 1000;
@@ -190,6 +203,11 @@
     r.visited = (r.visited || 0) + 1;
 
     if (cfg.mode === "current") return finishSession("done (single page)");
+
+    // Home mode: reload the home feed and keep scrolling (fresh top-of-feed posts
+    // each pass; global dedup drops repeats). The stop checks at the top of the
+    // next step() end the session on time / target / challenge.
+    if (cfg.mode === "home") { await setRun(r); return go(HOME_URL); }
 
     // Home-feed interleave: between topics, ~50% of the time detour to the home
     // timeline (the most representative feed) before moving on, unless we just
@@ -494,6 +512,16 @@
     if (onHome()) return "home feed";
     const item = run.queue && run.queue[run.idx];
     return item ? item.label : "…";
+  }
+
+  // The data topic a captured post is attributed to (distinct from the badge
+  // label): the home feed is its own bucket; on a /search topic it's the trend /
+  // query term; "current" mode lets the URL decide (null → background uses none).
+  function contextTopic(run, cfg) {
+    if (onHome()) return "(home feed)";
+    if (cfg.mode === "current") return null;
+    const item = run.queue && run.queue[run.idx];
+    return item ? item.label : null;
   }
 
   // Always-visible abort affordance (the popup closes on each navigation).

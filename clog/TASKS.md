@@ -25,6 +25,12 @@ Forward-looking backlog. The clog is the historical record; this is what's still
 - [x] **Home-feed interleave** (2026-06-05). ~50% of topic-advances detour to `/home`
   before the next topic (Trending + Manual; Current excluded). Home tweets bucketed as
   `(home feed)`; global dedup prevents double-counting.
+- [x] **Home-feed-only mode** (2026-06-05). New `home` source: stays on `/home`, scrolls +
+  dives, loops until session end.
+- [x] **Clean dive attribution** (2026-06-05). Driver stamps `run.context`; background
+  attributes by op (`HomeTimeline` → `(home feed)`, timing-proof) then falls back to the
+  stamped context for dives — so a thread-dive off home stays `(home feed)` instead of
+  leaking the last trend topic.
 
 ## Pre-merge (branch `autopilot` → `main`)
 
