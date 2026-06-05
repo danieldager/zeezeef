@@ -19,6 +19,8 @@
   const CFG_KEY = "autopilot_cfg"; // user settings
   const BADGE_ID = "__xcap_autopilot_badge";
   const TRENDING_URL = "https://x.com/explore/tabs/trending";
+  const HOME_URL = "https://x.com/home";
+  const HOME_CHANCE = 0.5; // odds of detouring to the home feed between topics
 
   const DEFAULTS = {
     mode: "trending", // "trending" | "manual" | "current"
@@ -139,6 +141,10 @@
     const myId = await myTabId();
     if (run.tabId != null && myId != null && run.tabId !== myId) return;
 
+    // Seed the badge's session count from storage (the content script re-injects
+    // on every navigation, so the in-memory count resets each topic).
+    badgeCount = Math.max(0, (await capturedCount()) - (run.startCount || 0));
+
     // Show the Stop badge immediately on the driving tab — including during the
     // navigate-to-Trends step, before any scrolling starts.
     showBadge(currentLabel(run, cfg));
@@ -184,6 +190,15 @@
     r.visited = (r.visited || 0) + 1;
 
     if (cfg.mode === "current") return finishSession("done (single page)");
+
+    // Home-feed interleave: between topics, ~50% of the time detour to the home
+    // timeline (the most representative feed) before moving on, unless we just
+    // scrolled it. idx is left untouched so the topic queue resumes where it was
+    // after the home visit. Global dedup means re-seen tweets never double-count.
+    if (!onHome() && Math.random() < HOME_CHANCE) {
+      await setRun(r); // persists the bumped visit count; idx unchanged
+      return go(HOME_URL);
+    }
 
     let next = r.idx + 1;
     if (next >= r.queue.length) {
@@ -246,7 +261,8 @@
           }
           // posts/min so far → adapt pace toward the target, never above the cap.
           const elapsedMin = Math.max(0.2, (Date.now() - r.startedAt) / 60000);
-          const rate = Math.max(0, have - (r.startCount || 0)) / elapsedMin; // posts/min this session
+          const sessionCount = Math.max(0, have - (r.startCount || 0)); // captured this session
+          const rate = sessionCount / elapsedMin; // posts/min this session
           if (cfg.targetPosts > 0) {
             const remainMin = Math.max(0.2, cfg.sessionMaxMin - elapsedMin);
             const required = (cfg.targetPosts - have) / remainMin; // posts/min still needed
@@ -256,6 +272,7 @@
           } else {
             paceFactor = 1; // no target → steady human pace
           }
+          badgeCount = sessionCount;
           updateBadgeRate(rate);
         }
       }
@@ -392,6 +409,10 @@
     return false;
   }
 
+  function onHome() {
+    return location.pathname === "/home";
+  }
+
   function onTrendingTab() {
     return location.pathname.startsWith("/explore");
   }
@@ -470,6 +491,7 @@
 
   function currentLabel(run, cfg) {
     if (cfg.mode === "current") return "this page";
+    if (onHome()) return "home feed";
     const item = run.queue && run.queue[run.idx];
     return item ? item.label : "…";
   }
@@ -477,6 +499,7 @@
   // Always-visible abort affordance (the popup closes on each navigation).
   let badgeLabel = "";
   let badgeRate = 0;
+  let badgeCount = 0; // tweets captured this session (shown on the badge)
   function showBadge(label) {
     badgeLabel = label;
     let b = document.getElementById(BADGE_ID);
@@ -502,7 +525,8 @@
     const b = document.getElementById(BADGE_ID);
     if (!b) return;
     b.textContent =
-      `■ Stop autopilot — ${badgeLabel}` + (badgeRate ? ` · ~${Math.round(badgeRate)}/min` : "");
+      `■ Stop autopilot — ${badgeLabel} · ${badgeCount} captured` +
+      (badgeRate ? ` · ~${Math.round(badgeRate)}/min` : "");
   }
   function removeBadge() {
     badgeRate = 0;

@@ -86,11 +86,16 @@ async function handlePayload(bodyText, apiUrl, pageUrl) {
   const captured = store[DATA_KEY] || [];
 
   const op = opName(apiUrl);
-  // topic from the /search URL; on a thread-dive (/status/ page) fall back to the
-  // autopilot's current topic so dived-into comments are still attributed.
+  // topic from the /search URL; the home-feed interleave is its own bucket; on a
+  // thread-dive (/status/ page) fall back to the autopilot's current topic so
+  // dived-into comments are still attributed to the trend they came from.
   let topic = topicFromUrl(pageUrl);
   const run = store[RUN_KEY];
-  if (!topic && run && run.running && run.queue && run.queue[run.idx]) {
+  let path = "";
+  try { path = new URL(pageUrl).pathname; } catch (_) {}
+  if (!topic && path === "/home") {
+    topic = "(home feed)";
+  } else if (!topic && run && run.running && run.queue && run.queue[run.idx]) {
     topic = run.queue[run.idx].label;
   }
   const now = Date.now();
