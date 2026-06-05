@@ -191,10 +191,18 @@
     run.context = contextTopic(run, cfg);
     await setRun(run);
 
-    // With a post target, scroll each topic deeper (until the feed runs dry, up
-    // to ~4 min) so it harvests more per topic at a steady pace.
-    const dwellMs = (cfg.targetPosts > 0 ? Math.max(cfg.dwellSec, 240) : cfg.dwellSec) * 1000;
-    const res = await scrollPage(dwellMs, cfg, { allowDives: true, checkRun: true });
+    // Home mode scrolls continuously into older posts for the whole remaining
+    // session (one long pass, no reset-to-top reloads — reaches older content and
+    // hits the target faster). Other modes use the per-topic dwell (deeper, ~4
+    // min, with a post target).
+    const remainMs = Math.max(0, capMin * 60000 - (Date.now() - run.startedAt));
+    const dwellMs = cfg.mode === "home"
+      ? remainMs
+      : (cfg.targetPosts > 0 ? Math.max(cfg.dwellSec, 240) : cfg.dwellSec) * 1000;
+    // Keep dives happening across a long home pass (≈2 per 90 s of scrolling)
+    // instead of the fixed 2-per-call used for short topic dwells.
+    const maxDives = cfg.mode === "home" ? Math.max(2, Math.round(dwellMs / 90000) * 2) : 2;
+    const res = await scrollPage(dwellMs, cfg, { allowDives: true, checkRun: true, maxDives });
     if (aborted || res === "abort" || res === "stop") return;
 
     // Re-read: the user may have stopped mid-dwell.
@@ -242,6 +250,7 @@
     let end = Date.now() + durationMs;
     const scroller = document.scrollingElement || document.documentElement;
     let lastH = 0, stale = 0, n = 0, dives = 0;
+    const maxDives = opts.maxDives || 2;
 
     const P_STOP = 0.12; // pause to read (sometimes enter a thread)
     const P_FAST = cfg.skimBursts ? 0.07 : 0; // fast scroll down
@@ -300,7 +309,7 @@
       // STOP — pause to read; sometimes drop into a comment thread.
       if (roll < P_STOP) {
         const canDive =
-          opts.allowDives && cfg.threadDives && dives < 2 &&
+          opts.allowDives && cfg.threadDives && dives < maxDives &&
           end - Date.now() > cfg.threadDwellSec * 1000 + 5000;
         if (canDive && Math.random() < 0.5) {
           const t0 = Date.now();
