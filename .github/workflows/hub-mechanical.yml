@@ -1,0 +1,37 @@
+name: HUB mechanical refresh
+
+# Deterministic, no-LLM refresh of HUB.md's mechanical bits (latest-clog link) on push.
+# Prose is refreshed locally via /hub before pushing (see global CLAUDE.md §7).
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'HUB.md'        # the bot's own HUB.md commit must not re-trigger this
+      - '.hub/**'
+
+permissions:
+  contents: write       # grant the run's token write, regardless of the repo default
+
+concurrency:
+  group: hub-mechanical-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Mechanical HUB refresh (deterministic, no LLM)
+        run: bash .hub/refresh-mechanical.sh
+      - name: Commit if changed
+        run: |
+          if git diff --quiet -- HUB.md; then
+            echo "HUB.md unchanged — nothing to commit"
+          else
+            git config user.name "hub-bot"
+            git config user.email "hub-bot@users.noreply.github.com"
+            git add HUB.md
+            git commit -m "docs: mechanical HUB refresh [skip ci]"
+            git push
+          fi
