@@ -1,6 +1,6 @@
-# Zeezeef — X capture (research) · WIP
+# zeerover — X capture (research) · WIP
 
-*Dutch for "sea-sieve."* A Chrome (Manifest V3) browse-and-capture extension for
+*Dutch for "pirate" (zee "sea" + rover "robber").* A Chrome (Manifest V3) browse-and-capture extension for
 X / Twitter posts → **NDJSON**, for research. A Chromium-side counterpart to
 [Zeeschuimer](https://github.com/digitalmethodsinitiative/zeeschuimer).
 

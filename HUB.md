@@ -1,8 +1,8 @@
-# Zeezeef (zeerover) — Hub
+# zeerover — Hub
 
 > Chrome MV3 extension that captures X/Twitter post text → NDJSON for research; a Chromium-side counterpart to Zeeschuimer. · Status: WIP — passive capture done in code/tests, autopilot merged but not browser-validated. · Refresh with `/hub`.
 
-Working dir is `zeerover/`; the product/remote is **Zeezeef** (`danieldager/zeezeef`).
+X/Twitter capture extension (formerly "Zeezeef"). Repo: `danieldager/zeerover`.
 
 ## 🧭 Navigate
 
