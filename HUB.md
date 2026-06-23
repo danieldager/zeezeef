@@ -11,7 +11,7 @@ X/Twitter capture extension (formerly "Zeezeef"). Repo: `danieldager/zeerover`.
 | Project guide / install / ethics | [README.md](README.md) |
 | Architecture & file map | [Architecture](#-architecture) (below — no REPO_MAP.md yet) |
 | Backlog (open + pre-merge) | [clog/TASKS.md](clog/TASKS.md) |
-| History (latest clog) | <!-- auto:clog -->[clog/](clog/) — latest [050626.md](clog/050626.md)<!-- /auto:clog --> · also `git log` |
+| History (latest clog) | [clog/050626.md](clog/050626.md) · also `git log` |
 | Test data / fixtures | [fixtures/README.md](fixtures/README.md) |
 | Sample output | `x_capture_*.ndjson` (4 local files, gitignored per X ToS) |
 | Eval results | _(N/A — this is an extension, not an ML pipeline)_ |
